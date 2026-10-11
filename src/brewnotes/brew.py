@@ -57,12 +57,13 @@ def diff_snapshots(before: Snapshot, after: Snapshot) -> list[Change]:
 
 
 def changed_since(snap: Snapshot, since: datetime, before: Snapshot | None = None) -> list[Change]:
-    """Anything (re)installed after `since`. The old version comes from `before` when it
-    has a different one, and is otherwise unknown."""
+    """Anything (re)installed after `since`, except casks versioned `latest`, whose reinstall
+    changes no version. The old version comes from `before` when it has a different one, and is
+    otherwise unknown."""
     ts = since.timestamp()
     changes = []
     for key, now in snap.items():
-        if now.time is None or now.time < ts:
+        if now.time is None or now.time < ts or now.version == "latest":
             continue
         prev = (before or {}).get(key)
         changes.append(_change(key, prev.version if prev and prev.version != now.version else None, now))

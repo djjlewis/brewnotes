@@ -81,7 +81,7 @@ def test_unknown_old_version_takes_releases_in_the_window_plus_the_current_one()
         [
             release("v1.3.0", published="2026-08-01T00:00:00Z"),
             release("v1.2.0", published="2026-07-20T00:00:00Z"),
-            release("v1.1.0", published="2026-06-01T00:00:00Z"),
+            release("v1.1.0", published="2026-07-13T00:00:00Z"),
         ]
     )
 
@@ -118,3 +118,54 @@ def test_github_docs_urls_are_not_mistaken_for_repos() -> None:
 
     assert (notes.repo, notes.text) == (None, "")
     assert notes.links == [("homepage", "https://docs.github.com/en/copilot/about")]
+
+
+def test_a_release_candidate_sorts_before_its_release() -> None:
+    gh = FakeGitHub([release("v2.0.0"), release("v2.0.0-rc1", prerelease=True)])
+
+    notes = fetch_notes(gh, change("2.0.0-rc1", "2.0.0"))
+
+    assert headings(notes.text) == ["v2.0.0"]
+
+
+def test_a_backport_among_newer_releases_does_not_stop_paging() -> None:
+    page_one = [release(f"v2.{n}.0") for n in range(30, 1, -1)] + [release("v1.9.9")]
+    gh = FakeGitHub([*page_one, release("v2.1.0"), release("v2.0.0")])
+
+    notes = fetch_notes(gh, change("2.0.0", "2.30.0"))
+
+    assert headings(notes.text)[-1] == "v2.1.0"
+
+
+def test_diff_link_stays_within_the_tag_family() -> None:
+    gh = FakeGitHub([release("rust-v0.5.0"), release("sdk-v0.4.0"), release("rust-v0.4.0")])
+
+    notes = fetch_notes(gh, change("0.4.0", "0.5.0"))
+
+    assert ("diff", "https://github.com/acme/tool/compare/rust-v0.4.0...rust-v0.5.0") in notes.links
+
+
+def test_no_diff_link_when_the_new_version_has_no_release() -> None:
+    gh = FakeGitHub([release("v1.2.1"), release("v1.2.0")])
+
+    notes = fetch_notes(gh, change("1.2.0", "1.3.0"))
+
+    assert [label for label, _ in notes.links if label == "diff"] == []
+
+
+def test_a_changelog_bullet_mentioning_the_old_version_does_not_end_the_section() -> None:
+    changelog = "## 1.3.0\n- Fix regression from 1.2.0\n- Faster\n\n## 1.2.0\n- old\n"
+    gh = FakeGitHub(files={"CHANGELOG.md": changelog})
+
+    notes = fetch_notes(gh, change("1.2.0", "1.3.0"))
+
+    assert notes.text == "## 1.3.0\n- Fix regression from 1.2.0\n- Faster\n"
+
+
+def test_changelog_section_ends_below_an_old_version_with_no_heading() -> None:
+    changelog = "## 1.3.0\n- new\n\n## 1.2.1\n- fix\n\n## 1.1.0\n- older\n"
+    gh = FakeGitHub(files={"CHANGELOG.md": changelog})
+
+    notes = fetch_notes(gh, change("1.2.0", "1.3.0"))
+
+    assert notes.text == "## 1.3.0\n- new\n\n## 1.2.1\n- fix\n"

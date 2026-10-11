@@ -65,8 +65,8 @@ lookups at most. If you can't find them, use severity "unknown".
 """
 
 NOTES_MISSING = """
-No release notes were found automatically. Judge from the version jump alone; use "unknown" unless it is a
-major bump.
+No release notes were found automatically. Use severity "unknown". If you reliably know what this version
+changed, say so in the tldr; otherwise say the notes weren't found.
 """
 
 ADVISORY_RE = re.compile(r"CVE-\d{4}-\d+|GHSA-\w{4}-\w{4}-\w{4}")
@@ -114,12 +114,12 @@ def looks_security_related(notes: Notes) -> bool:
 
 def heuristic(change: Change, notes: Notes) -> Triage:
     text = notes.text
-    if SECURITY_RE.search(text):
+    if not text:
+        sev = "unknown"
+    elif SECURITY_RE.search(text):
         sev = "security"
     elif change.major_bump or re.search(r"breaking change|BREAKING", text):
         sev = "breaking"
-    elif not text:
-        sev = "unknown"
     elif BREAKING_RE.search(text):
         sev = "notable"
     else:
@@ -176,11 +176,11 @@ class Triager:
         self.problem = problem
 
     def triage(self, change: Change, notes: Notes) -> Triage:
-        if self.problem or self.ask is None:
-            return heuristic(change, notes)
         cache = self.cache_dir / _cache_name(change, notes)
         if self.use_cache and cache.exists():
             return Triage(**json.loads(cache.read_text()))
+        if self.problem or self.ask is None:
+            return heuristic(change, notes)
 
         web = self.ask_web is not None and not notes.text and change.requested
         if not notes.text and not web and not change.major_bump:

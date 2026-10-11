@@ -86,3 +86,19 @@ def test_missing_notes_without_web_lookup_skip_the_llm(tmp_path: Path) -> None:
     t = triager.triage(change(), Notes())
 
     assert (t.severity, t.tldr) == ("unknown", "No release notes found.")
+
+
+def test_a_major_bump_with_no_notes_is_unknown(tmp_path: Path) -> None:
+    triager = Triager("claude-cli", answers(), None, tmp_path, problem="login expired")
+
+    t = triager.triage(change(old="1.9.0", new="2.0.0"), Notes())
+
+    assert t.severity == "unknown"
+
+
+def test_cached_answers_survive_the_backend_going_down(tmp_path: Path) -> None:
+    Triager("claude-cli", answers(ANSWER), None, tmp_path).triage(change(), NOTES)
+
+    t = Triager("claude-cli", answers(), None, tmp_path, problem="login expired").triage(change(), NOTES)
+
+    assert t.tldr == "Config moved."

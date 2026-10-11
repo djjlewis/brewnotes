@@ -2,7 +2,7 @@
 
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any, Protocol
 
 from .brew import Change
@@ -14,6 +14,7 @@ GITHUB_RE = re.compile(r"(?:^|//)(?:www\.)?github\.com/([A-Za-z0-9_.-]+)/([A-Za-
 CHANGELOG_RE = re.compile(
     r"^(changelog|changes|news|history|release[-_]?notes)(\.(md|markdown|rst|txt))?$", re.IGNORECASE
 )
+BARE_HEADING_RE = re.compile(r"\s*\[?(v|version |release )?\d+(\.\d+)+", re.IGNORECASE)
 NOT_OWNERS = {"sponsors", "orgs", "apps", "features", "marketplace", "settings"}
 
 
@@ -98,7 +99,7 @@ def _wanted(r: Release, change: Change, since: datetime | None) -> bool:
     if change.old:
         return version_key(r.version) > version_key(change.old)
     # Unknown previous version: releases published in the window, plus the one we're on.
-    in_window = since is not None and r.published is not None and r.published >= since - timedelta(days=3)
+    in_window = since is not None and r.published is not None and r.published >= since
     return in_window or is_target
 
 
@@ -115,17 +116,22 @@ def _list_releases(src: Source, repo: str, change: Change, since: datetime | Non
         batch = src.releases(repo, page, PAGE_SIZE) or src.releases(repo, page, PAGE_SIZE)  # retry 5xx blips
         if not batch:
             break
-        out += [r for raw in batch if (r := Release.parse(raw))]
-        if len(batch) < PAGE_SIZE or not out or _past_range(out[-1], change, since):
+        page_rels = [r for raw in batch if (r := Release.parse(raw))]
+        out += page_rels
+        if len(batch) < PAGE_SIZE or _reached_start(page_rels, change, since):
             break
     return out
 
 
-def _past_range(oldest: Release, change: Change, since: datetime | None) -> bool:
+def _reached_start(page: list[Release], change: Change, since: datetime | None) -> bool:
+    """True once a page holds the old version, or holds nothing newer than it. Checking the
+    whole page, not its last entry, keeps a backport (v1.9.9 among v2.x) from stopping early."""
     if change.old:
-        return version_key(oldest.version) <= version_key(change.old)
-    if since and oldest.published:
-        return oldest.published < since - timedelta(days=30)
+        old = version_key(change.old)
+        has_old = any(same_version(r.version, change.old) for r in page)
+        return has_old or all(version_key(r.version) <= old for r in page)
+    if since:
+        return all(r.published is not None and r.published < since for r in page)
     return True
 
 
@@ -133,33 +139,32 @@ def _past_range(oldest: Release, change: Change, since: datetime | None) -> bool
 
 
 def changelog_section(text: str, new: str, old: str | None) -> str | None:
-    """The lines from the `new` version's heading down to the `old` one's, or to the next
-    version heading when `old` is unknown. None when `new` has no heading."""
+    """The lines from the `new` version's heading down to the first heading at or below `old`,
+    or to the next version heading when `old` is unknown. None when `new` has no heading."""
     lines = text.splitlines()
-    start = _heading_line(lines, new, 0)
+    headings = _version_headings(lines)
+    start = next((h for h in headings if same_version(h[2], new)), None)
     if start is None:
         return None
-    end = _heading_line(lines, old, start + 1) if old else None
-    if end is None:
-        marker = lines[start][:2]
-        end = next(
-            (
-                i
-                for i in range(start + 1, len(lines))
-                if lines[i].startswith(marker) and version_from_tag(lines[i])
-            ),
-            len(lines),
-        )
-    return "\n".join(lines[start:end])
+    later = [h for h in headings if h[0] > start[0] and h[1] == start[1]]
+    if old:
+        end = next((i for i, _, v in later if version_key(v) <= version_key(old)), len(lines))
+    else:
+        end = next((i for i, _, v in later if not same_version(v, new)), len(lines))
+    return "\n".join(lines[start[0] : end])
 
 
-def _heading_line(lines: list[str], version: str, start: int) -> int | None:
-    pat = re.compile(rf"(^|[^\d.]){re.escape(version)}($|[^\d])")
-    for i in range(start, len(lines)):
-        looks_like_heading = lines[i].startswith(("#", "=", "v", "V", "[")) or len(lines[i]) < 60
-        if looks_like_heading and pat.search(lines[i]):
-            return i
-    return None
+def _version_headings(lines: list[str]) -> list[tuple[int, int, str]]:
+    """(line index, heading level, version) for each heading that names a version. Level is the
+    number of `#`s, 0 for underlined or bare version lines. Bullets and prose don't count."""
+    out = []
+    for i, line in enumerate(lines):
+        level = len(line) - len(line.lstrip("#"))
+        underlined = i + 1 < len(lines) and line.strip() and re.fullmatch(r"\s*(=+|-+)\s*", lines[i + 1])
+        is_heading = level or underlined or BARE_HEADING_RE.match(line)
+        if is_heading and (v := version_from_tag(line)):
+            out.append((i, level, v))
+    return out
 
 
 def _changelog(src: Source, repo: str, change: Change) -> str | None:
@@ -184,12 +189,17 @@ def fetch_notes(src: Source, change: Change, since: datetime | None = None) -> N
     if rels:
         notes.text = "\n\n".join(f"## {r.tag} ({_date(r)})\n{r.body or '(no notes)'}" for r in rels)
         notes.source = "releases"
-        notes.links.insert(0, ("release notes", rels[0].url))
-        old_tag = next(
-            (r.tag for r in everything if change.old and same_version(r.version, change.old)), None
-        )
-        if old_tag:
-            notes.links.append(("diff", f"https://github.com/{notes.repo}/compare/{old_tag}...{rels[0].tag}"))
+        new_rel = next((r for r in rels if same_version(r.version, change.new)), None)
+        family = _same_family(everything, change.new)
+        old_rel = next((r for r in family if change.old and same_version(r.version, change.old)), None)
+        if new_rel:
+            notes.links.insert(0, ("release notes", new_rel.url))
+        else:
+            notes.links.insert(0, ("releases", f"https://github.com/{notes.repo}/releases"))
+        if new_rel and old_rel:
+            notes.links.append(
+                ("diff", f"https://github.com/{notes.repo}/compare/{old_rel.tag}...{new_rel.tag}")
+            )
     else:
         notes.text = _changelog(src, notes.repo, change) or ""
         notes.source = "changelog" if notes.text else ""

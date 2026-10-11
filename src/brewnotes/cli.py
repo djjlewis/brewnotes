@@ -78,8 +78,6 @@ class Run:
             self.err.print(
                 f"[bold red]LLM triage unavailable, used keyword heuristics:[/] {self.triager.problem}"
             )
-            if self.cfg.backend == "claude-cli":
-                self.err.print("[dim]Run `claude` in a terminal and use /login, or try --backend api.[/]")
         now = datetime.now()
         save = items and not self.args.no_save
         md = save_markdown(items, title, self.cfg.reports_path, mode, now) if save else None
@@ -133,12 +131,16 @@ def build_parser() -> argparse.ArgumentParser:
     return ap
 
 
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    """Parses the command line. With no subcommand, the arguments go to `preview`."""
+    commands = {"preview", "recap", "config", "-h", "--help"}
+    if not argv or argv[0] not in commands:
+        argv = ["preview", *argv]
+    return build_parser().parse_args(argv)
+
+
 def main(argv: list[str] | None = None) -> None:
-    argv = sys.argv[1:] if argv is None else argv
-    ap = build_parser()
-    args = ap.parse_args(argv)
-    if args.cmd is None:
-        args = ap.parse_args(["preview", *argv])
+    args = parse_args(sys.argv[1:] if argv is None else argv)
     paths = Paths.from_env(os.environ, Path.home())
     cfg = load_config(paths.config)
     if args.cmd == "config":
