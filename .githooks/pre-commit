@@ -1,0 +1,16 @@
+#!/bin/sh
+# Reject staged source files over MAX_LINES. Split them by responsibility.
+MAX_LINES=400
+
+status=0
+git diff --cached --name-only --diff-filter=ACM -- '*.py' '*.ts' '*.tsx' '*.js' '*.jsx' |
+{
+  while IFS= read -r file; do
+    lines=$(git show ":$file" | wc -l | tr -d ' ')
+    if [ "$lines" -gt "$MAX_LINES" ]; then
+      echo "pre-commit: $file has $lines lines (limit $MAX_LINES). Split it by responsibility." >&2
+      status=1
+    fi
+  done
+  exit $status
+}

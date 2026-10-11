@@ -1,0 +1,10 @@
+# Changes here will be overwritten by Copier; do not edit manually.
+_commit: v0.1.1
+_src_path: /Users/dan/projects/personal/agentic-starter-repo
+description: 'A triaged TL;DR of release notes for your Homebrew updates: security
+    fixes and breaking changes first, trivia collapsed.'
+extra_skills: []
+issue_tracker: local
+languages:
+- python
+project_name: brewnotes

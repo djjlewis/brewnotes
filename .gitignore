@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.egg-info/
+
+# ~/.gitignore_global ignores .claude; the skill links must be committed.
+!/.claude/
+/.claude/settings.local.json
