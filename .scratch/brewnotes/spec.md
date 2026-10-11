@@ -18,7 +18,8 @@ Decisions in this spec were agreed with the owner on 2026-10-11.
 - Reports cover formulae installed on request (or listed by `brew leaves`) and all casks.
 - A dependency appears only when its notes look security-related. `--deps` or `include_dependencies = true` includes every changed dependency.
 - Packages in the config's `ignore` list never appear.
-- A cask whose old and new versions are the same (such as `latest`) is not a change.
+- In `preview`, an update whose old and new versions are the same (such as a cask versioned `latest`) is not a change.
+- `recap --since` skips casks versioned `latest`. It still reports a package whose snapshot version matches the installed one, because the snapshot may have been saved after the upgrade.
 
 ## Finding the notes
 

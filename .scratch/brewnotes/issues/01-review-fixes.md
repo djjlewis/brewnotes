@@ -1,6 +1,6 @@
 # Fix the spec review's wrong behaviours
 
-Status: claimed
+Status: resolved
 Branch: fix/review-findings
 
 The `/code-review` Spec axis found 12 behaviours that contradict [the spec](../spec.md). Fix each one test-first. Standards findings and scope questions are out of scope here. They wait on the owner.
@@ -14,7 +14,7 @@ The `/code-review` Spec axis found 12 behaviours that contradict [the spec](../s
 5. An update from 0.4.0 to 0.5.0, with tags `rust-v0.5.0`, `sdk-v0.4.0`, and `rust-v0.4.0`, links the diff `compare/rust-v0.4.0...rust-v0.5.0`. If the new version has no release, there is no diff link.
 6. A changelog bullet that mentions the old version does not end the section. If the old version has no heading, the section ends at the first heading below it.
 7. With `--since 2026-07-15`, the notes leave out a release published on 2026-07-13.
-8. `recap --since` skips a cask reinstalled at the same version, such as `latest`.
+8. `recap --since` skips a cask versioned `latest`.
 9. `brewnotes --all` runs `preview` with `--all`.
 10. A major bump with no notes is `unknown`.
 11. A cached answer is still used after the backend becomes unavailable.
@@ -34,6 +34,6 @@ A second `/code-review` of commit b674a2a found regressions and gaps in these fi
 - `--no-cache` applies when the backend is unavailable from the start.
 - A missing `claude` executable stops the backend with a message. This path already existed and now has a test.
 
-Example 8 is open. The code skips only casks versioned `latest`. Skipping every package whose snapshot version equals the installed one would hide real updates whenever the snapshot was saved after an upgrade. The owner decides which rule the spec should state.
+Example 8: the owner chose to skip only casks versioned `latest`. Skipping every package whose snapshot version equals the installed one would hide real updates whenever the snapshot was saved after an upgrade. The spec and example 8 now state that rule.
 
 Verification on the branch: `uv run ruff format --check . && uv run ruff check . && uv run mypy . && uv run pytest` passes with 36 tests. A real `brewnotes --no-update --greedy --no-save` run against Homebrew printed the triaged report.
