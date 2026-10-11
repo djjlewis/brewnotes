@@ -64,11 +64,6 @@ or changelog covering versions after {old} up to {new} (homepage: {homepage}). K
 lookups at most. If you can't find them, use severity "unknown".
 """
 
-NOTES_MISSING = """
-No release notes were found automatically. Use severity "unknown". If you reliably know what this version
-changed, say so in the tldr; otherwise say the notes weren't found.
-"""
-
 ADVISORY_RE = re.compile(r"CVE-\d{4}-\d+|GHSA-\w{4}-\w{4}-\w{4}")
 SECURITY_RE = re.compile(
     r"\bCVE-\d{4}-\d+|GHSA-\w{4}-\w{4}-\w{4}|\bsecurity\b|vulnerab|exploit|\bXSS\b|RCE\b", re.IGNORECASE
@@ -127,12 +122,13 @@ def heuristic(change: Change, notes: Notes) -> Triage:
     return Triage(sev, HEURISTIC_TLDR[sev], cves=sorted(set(ADVISORY_RE.findall(text))), by="heuristic")
 
 
-def build_prompt(change: Change, notes: Notes, interests: str, web: bool) -> str:
+def build_prompt(change: Change, notes: Notes, interests: str) -> str:
+    """With no notes, the prompt asks Claude to find them on the web."""
     if notes.text:
         section = NOTES_PROVIDED.format(
             source=notes.source, trunc=", truncated" if notes.truncated else "", text=notes.text
         )
-    elif web:
+    else:
         section = NOTES_MISSING_WEB.format(
             repo=f" (GitHub repo {notes.repo} has no releases or changelog for this range)"
             if notes.repo
@@ -141,8 +137,6 @@ def build_prompt(change: Change, notes: Notes, interests: str, web: bool) -> str
             new=change.new,
             homepage=change.homepage or "unknown",
         )
-    else:
-        section = NOTES_MISSING
     return PROMPT.format(
         interests=interests or "a general developer",
         name=change.name,
@@ -183,11 +177,11 @@ class Triager:
             return heuristic(change, notes)
 
         web = self.ask_web is not None and not notes.text and change.requested
-        if not notes.text and not web and not change.major_bump:
+        if not notes.text and not web:
             return heuristic(change, notes)  # nothing for an LLM to read
         ask = self.ask_web if web and self.ask_web else self.ask
         try:
-            t = Triage.from_llm(ask(build_prompt(change, notes, self.interests, web)), self.name)
+            t = Triage.from_llm(ask(build_prompt(change, notes, self.interests)), self.name)
         except BackendUnavailable as e:
             self.problem = str(e)
             return heuristic(change, notes)

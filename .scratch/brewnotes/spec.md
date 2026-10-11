@@ -54,7 +54,7 @@ Failure handling:
 
 - If the backend can't work at all (an expired login or a missing key), the run uses heuristics for every remaining package and prints why, with the fix.
 - If one request fails, that package gets the heuristic result with the error in its TL;DR. Other packages still use the LLM.
-- A package with no notes, no web lookup, and no major version bump skips the LLM.
+- A package with no notes and no web lookup skips the LLM and is `unknown`.
 - Results are cached per package, version range, and notes text, so a `recap` after a `preview` doesn't triage again. `--no-cache` bypasses the cache.
 
 ## Output

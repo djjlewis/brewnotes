@@ -31,15 +31,17 @@ def make_triager(cfg: Config, paths: Paths, use_cache: bool) -> Triager | None:
     """None for the heuristics-only backend."""
     if cfg.backend == "none":
         return None
+    ask = ask_web = None
+    problem = None
     try:
         if cfg.backend == "api":
-            ask, ask_web = llm.anthropic_api(SCHEMA, cfg.api_model), None
+            ask = llm.anthropic_api(SCHEMA, cfg.api_model)
         else:
             ask = llm.claude_cli(SCHEMA, cfg.model)
             ask_web = llm.claude_cli(SCHEMA, cfg.model, web=True) if cfg.web_lookup else None
     except llm.BackendUnavailable as e:
-        return Triager(cfg.backend, None, None, paths.cache, problem=str(e))
-    return Triager(cfg.backend, ask, ask_web, paths.cache, cfg.interests, use_cache)
+        problem = str(e)
+    return Triager(cfg.backend, ask, ask_web, paths.cache, cfg.interests, use_cache, problem)
 
 
 class Run:
@@ -133,10 +135,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
     """Parses the command line. With no subcommand, the arguments go to `preview`."""
-    commands = {"preview", "recap", "config", "-h", "--help"}
-    if not argv or argv[0] not in commands:
-        argv = ["preview", *argv]
-    return build_parser().parse_args(argv)
+    ap = build_parser()
+    known, _ = ap.parse_known_args(argv)
+    return ap.parse_args(argv if known.cmd else ["preview", *argv])
 
 
 def main(argv: list[str] | None = None) -> None:

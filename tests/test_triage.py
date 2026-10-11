@@ -102,3 +102,11 @@ def test_cached_answers_survive_the_backend_going_down(tmp_path: Path) -> None:
     t = Triager("claude-cli", answers(), None, tmp_path, problem="login expired").triage(change(), NOTES)
 
     assert t.tldr == "Config moved."
+
+
+def test_a_major_bump_with_no_notes_is_unknown_even_when_the_llm_is_up(tmp_path: Path) -> None:
+    triager = Triager("api", answers(ANSWER), None, tmp_path)
+
+    t = triager.triage(change(old="1.9.0", new="2.0.0"), Notes())
+
+    assert t.severity == "unknown"

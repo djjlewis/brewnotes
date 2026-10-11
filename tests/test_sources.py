@@ -169,3 +169,49 @@ def test_changelog_section_ends_below_an_old_version_with_no_heading() -> None:
     notes = fetch_notes(gh, change("1.2.0", "1.3.0"))
 
     assert notes.text == "## 1.3.0\n- new\n\n## 1.2.1\n- fix\n"
+
+
+def test_a_monorepo_page_with_another_familys_old_version_does_not_stop_paging() -> None:
+    newer = [release(f"rust-v0.9.{n}") for n in range(14, 0, -1)]
+    older = [release(f"rust-v0.6.{n}") for n in range(15, 0, -1)]
+    gh = FakeGitHub([*newer, release("sdk-v0.4.0"), *older, release("rust-v0.5.0"), release("rust-v0.4.0")])
+
+    notes = fetch_notes(gh, change("0.4.0", "0.9.14"))
+
+    assert headings(notes.text)[-1] == "rust-v0.5.0"
+
+
+def test_a_python_style_prerelease_sorts_before_its_release() -> None:
+    gh = FakeGitHub([release("v1.2.0"), release("v1.2.0b1", prerelease=True)])
+
+    notes = fetch_notes(gh, change("1.2.0b1", "1.2.0"))
+
+    assert headings(notes.text) == ["v1.2.0"]
+
+
+def test_numbered_previews_are_different_versions() -> None:
+    gh = FakeGitHub(
+        [release("v3.0.0-preview2", prerelease=True), release("v3.0.0-preview1", prerelease=True)]
+    )
+
+    notes = fetch_notes(gh, change("3.0.0-preview1", "3.0.0-preview2"))
+
+    assert headings(notes.text) == ["v3.0.0-preview2"]
+
+
+def test_changelog_body_lines_starting_with_a_number_are_not_headings() -> None:
+    changelog = "Version 1.3.0\n0.5 GB less memory\n2.5x faster startup\n\nVersion 1.2.0\n- old\n"
+    gh = FakeGitHub(files={"CHANGELOG.md": changelog})
+
+    notes = fetch_notes(gh, change("1.2.0", "1.3.0"))
+
+    assert notes.text == "Version 1.3.0\n0.5 GB less memory\n2.5x faster startup\n"
+
+
+def test_changelog_section_ends_at_an_old_version_heading_of_a_higher_level() -> None:
+    changelog = "## 2.1.0\n- a\n\n# 2.0.0\n- major stuff\n\n## 1.9.0\n- b\n"
+    gh = FakeGitHub(files={"CHANGELOG.md": changelog})
+
+    notes = fetch_notes(gh, change("2.0.0", "2.1.0"))
+
+    assert notes.text == "## 2.1.0\n- a\n"

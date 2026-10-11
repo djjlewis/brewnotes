@@ -22,7 +22,11 @@ class BackendError(RuntimeError):
 
 CLI_LOGIN_FIX = "Run `claude` in a terminal and use /login, or try --backend api."
 API_KEY_FIX = "Set ANTHROPIC_API_KEY or run `ant auth login`."
-AUTH_ERROR_RE = re.compile(r"authenticat|oauth|log ?in|api key", re.IGNORECASE)
+# Phrases from Claude Code's login failures. Kept narrow: a transient error that merely mentions
+# an API key ("Rate limit exceeded for this API key") must not stop the backend.
+AUTH_ERROR_RE = re.compile(
+    r"failed to authenticate|oauth|not logged in|/login|invalid api key", re.IGNORECASE
+)
 
 
 def claude_cli(schema: dict[str, Any], model: str = "", web: bool = False, timeout: float = 300) -> Ask:

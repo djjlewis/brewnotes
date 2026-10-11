@@ -3,7 +3,7 @@
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Protocol
+from typing import Any, NamedTuple, Protocol
 
 from .brew import Change
 from .versions import same_version, version_from_tag, version_key
@@ -14,7 +14,10 @@ GITHUB_RE = re.compile(r"(?:^|//)(?:www\.)?github\.com/([A-Za-z0-9_.-]+)/([A-Za-
 CHANGELOG_RE = re.compile(
     r"^(changelog|changes|news|history|release[-_]?notes)(\.(md|markdown|rst|txt))?$", re.IGNORECASE
 )
-BARE_HEADING_RE = re.compile(r"\s*\[?(v|version |release )?\d+(\.\d+)+", re.IGNORECASE)
+BARE_HEADING_RE = re.compile(
+    r"\s*\[?(v|version |release )?\d+(\.\d+)+\S*(\s*$|\s+[-(\[]|\s+\d{4}-\d\d)", re.IGNORECASE
+)
+UNDERLINE_RE = re.compile(r"\s*(=+|-+)\s*")
 NOT_OWNERS = {"sponsors", "orgs", "apps", "features", "marketplace", "settings"}
 
 
@@ -118,7 +121,11 @@ def _list_releases(src: Source, repo: str, change: Change, since: datetime | Non
             break
         page_rels = [r for raw in batch if (r := Release.parse(raw))]
         out += page_rels
-        if len(batch) < PAGE_SIZE or _reached_start(page_rels, change, since):
+        # Judge the page by the target's tag family only, so another product's old version
+        # in a monorepo doesn't stop paging.
+        family = {r.tag for r in _same_family(out, change.new)}
+        page_family = [r for r in page_rels if r.tag in family]
+        if len(batch) < PAGE_SIZE or (page_family and _reached_start(page_family, change, since)):
             break
     return out
 
@@ -138,32 +145,45 @@ def _reached_start(page: list[Release], change: Change, since: datetime | None) 
 # --- changelog fallback -----------------------------------------------------
 
 
+class Heading(NamedTuple):
+    line: int
+    level: int  # the number of `#`s, 0 for an underlined or bare version line
+    version: str
+
+
 def changelog_section(text: str, new: str, old: str | None) -> str | None:
     """The lines from the `new` version's heading down to the first heading at or below `old`,
-    or to the next version heading when `old` is unknown. None when `new` has no heading."""
+    or to the next version heading when `old` is unknown. Only headings of the same or a higher
+    level end the section. None when `new` has no heading."""
     lines = text.splitlines()
     headings = _version_headings(lines)
-    start = next((h for h in headings if same_version(h[2], new)), None)
+    start = next((h for h in headings if same_version(h.version, new)), None)
     if start is None:
         return None
-    later = [h for h in headings if h[0] > start[0] and h[1] == start[1]]
+    later = [h for h in headings if h.line > start.line and _same_or_higher(h, start)]
     if old:
-        end = next((i for i, _, v in later if version_key(v) <= version_key(old)), len(lines))
+        end = next((h.line for h in later if version_key(h.version) <= version_key(old)), len(lines))
     else:
-        end = next((i for i, _, v in later if not same_version(v, new)), len(lines))
-    return "\n".join(lines[start[0] : end])
+        end = next((h.line for h in later if not same_version(h.version, new)), len(lines))
+    return "\n".join(lines[start.line : end])
 
 
-def _version_headings(lines: list[str]) -> list[tuple[int, int, str]]:
-    """(line index, heading level, version) for each heading that names a version. Level is the
-    number of `#`s, 0 for underlined or bare version lines. Bullets and prose don't count."""
+def _same_or_higher(h: Heading, start: Heading) -> bool:
+    if start.level == 0:
+        return h.level == 0
+    return 1 <= h.level <= start.level
+
+
+def _version_headings(lines: list[str]) -> list[Heading]:
+    """Each heading that names a version: `#` headings, underlined headings, and lines that are
+    only a version with an optional date (`Version 1.3.0`, `1.3.0 (2026-10-01)`)."""
     out = []
     for i, line in enumerate(lines):
         level = len(line) - len(line.lstrip("#"))
-        underlined = i + 1 < len(lines) and line.strip() and re.fullmatch(r"\s*(=+|-+)\s*", lines[i + 1])
-        is_heading = level or underlined or BARE_HEADING_RE.match(line)
+        underlined = i + 1 < len(lines) and bool(line.strip()) and bool(UNDERLINE_RE.fullmatch(lines[i + 1]))
+        is_heading = level > 0 or underlined or bool(BARE_HEADING_RE.match(line))
         if is_heading and (v := version_from_tag(line)):
-            out.append((i, level, v))
+            out.append(Heading(i, level, v))
     return out
 
 
@@ -192,10 +212,7 @@ def fetch_notes(src: Source, change: Change, since: datetime | None = None) -> N
         new_rel = next((r for r in rels if same_version(r.version, change.new)), None)
         family = _same_family(everything, change.new)
         old_rel = next((r for r in family if change.old and same_version(r.version, change.old)), None)
-        if new_rel:
-            notes.links.insert(0, ("release notes", new_rel.url))
-        else:
-            notes.links.insert(0, ("releases", f"https://github.com/{notes.repo}/releases"))
+        notes.links.insert(0, ("release notes", (new_rel or rels[0]).url))
         if new_rel and old_rel:
             notes.links.append(
                 ("diff", f"https://github.com/{notes.repo}/compare/{old_rel.tag}...{new_rel.tag}")
