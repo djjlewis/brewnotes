@@ -8,6 +8,7 @@
 🟢 Notable enhancements     features you would want to know about
 ⚪ Minor                    bug fixes and tweaks, names only (use --all)
 ❔ Couldn't find notes      names only, with links
+⚠️ Couldn't check          GitHub failed; names grouped by the reason
 ```
 
 ## Install
