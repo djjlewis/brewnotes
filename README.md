@@ -34,10 +34,18 @@ brewnotes config             # print the config file path
 
 Each run prints to the terminal and saves a markdown report in `~/Documents/brewnotes/`. Add `--no-save` to skip the file and `--all` to expand the minor items.
 
-To review before you upgrade, add this function to your shell rc:
+To review updates before you install them, add a `bup` function to your shell config. `bup` shows the preview and asks whether to upgrade. If you press `y`, it runs `brew upgrade`, then `brewnotes recap`, which saves the new versions as the snapshot for the next recap. Any other key stops before the upgrade.
+
+For zsh, add this to `~/.zshrc`:
+
+```zsh
+bup() { brewnotes preview && read -q "?Upgrade? [y/N] " && echo && brew upgrade && brewnotes recap --no-save; }
+```
+
+For bash, add this to `~/.bashrc`. It also works with the bash 3.2 that ships with macOS.
 
 ```bash
-bup() { brewnotes preview && read -q "?Upgrade? [y/N] " && echo && brew upgrade && brewnotes recap --no-save; }
+bup() { brewnotes preview && read -r -n 1 -p "Upgrade? [y/N] " && echo && [[ $REPLY == [yY] ]] && brew upgrade && brewnotes recap --no-save; }
 ```
 
 The recap reuses the cached triage from the preview, so it costs nothing extra.
