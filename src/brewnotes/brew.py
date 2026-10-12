@@ -4,7 +4,7 @@ import json
 import subprocess
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal, cast
 
 from .versions import clean_version, leading_int
 
@@ -19,13 +19,14 @@ class Installed:
     urls: list[str] = field(default_factory=list)  # candidates for locating the source repo
 
 
-Snapshot = dict[str, Installed]  # keyed "formula:name" / "cask:name"
+Snapshot = dict[str, Installed]
+Kind = Literal["formula", "cask"]  # keyed "formula:name" / "cask:name"
 
 
 @dataclass
 class Change:
     name: str
-    kind: str  # "formula" | "cask"
+    kind: Kind
     old: str | None  # None when unknown (recap without a snapshot)
     new: str
     desc: str = ""
@@ -74,7 +75,7 @@ def _change(key: str, old: str | None, now: Installed) -> Change:
     kind, name = key.split(":", 1)
     return Change(
         name=name,
-        kind=kind,
+        kind=cast(Kind, kind),
         old=old,
         new=now.version,
         desc=now.desc,
@@ -100,8 +101,12 @@ def _brew_json(*args: str) -> Any:
     return json.loads(out)
 
 
-def update() -> None:
-    subprocess.run(["brew", "update", "--quiet"], check=False)
+def update() -> str | None:
+    """Runs `brew update`. Returns brew's error message when it fails, None on success."""
+    p = subprocess.run(["brew", "update", "--quiet"], capture_output=True, text=True, check=False)
+    if p.returncode == 0:
+        return None
+    return p.stderr.strip() or f"brew update exited {p.returncode}"
 
 
 def installed() -> Snapshot:

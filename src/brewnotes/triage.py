@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 from dataclasses import asdict, dataclass, field
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -11,12 +12,24 @@ from .brew import Change
 from .llm import Ask, BackendError, BackendUnavailable
 from .sources import Notes
 
-SEVERITIES = ["security", "breaking", "notable", "minor", "unknown"]
+
+class Severity(StrEnum):
+    """Most severe first; the report shows sections in this order."""
+
+    SECURITY = "security"
+    BREAKING = "breaking"
+    NOTABLE = "notable"
+    MINOR = "minor"
+    UNKNOWN = "unknown"
+    UNCHECKED = "unchecked"  # GitHub couldn't be checked; set by brewnotes, never by Claude
+
+
+LLM_SEVERITIES = [s.value for s in Severity if s is not Severity.UNCHECKED]
 
 SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "severity": {"type": "string", "enum": SEVERITIES},
+        "severity": {"type": "string", "enum": LLM_SEVERITIES},
         "tldr": {"type": "string"},
         "highlights": {"type": "array", "items": {"type": "string"}},
         "action_needed": {"type": "string"},
@@ -71,17 +84,17 @@ SECURITY_RE = re.compile(
 BREAKING_RE = re.compile(r"breaking|\bremoved?\b|no longer|deprecat|incompatib|migrat|renamed", re.IGNORECASE)
 
 HEURISTIC_TLDR = {
-    "security": "Release notes mention security fixes.",
-    "breaking": "Major version bump or breaking changes mentioned. Check the notes.",
-    "notable": "Mentions removals or deprecations. Worth a skim.",
-    "minor": "Nothing flagged by keyword scan.",
-    "unknown": "No release notes found.",
+    Severity.SECURITY: "Release notes mention security fixes.",
+    Severity.BREAKING: "Major version bump or breaking changes mentioned. Check the notes.",
+    Severity.NOTABLE: "Mentions removals or deprecations. Worth a skim.",
+    Severity.MINOR: "Nothing flagged by keyword scan.",
+    Severity.UNKNOWN: "No release notes found.",
 }
 
 
 @dataclass
 class Triage:
-    severity: str
+    severity: Severity
     tldr: str
     highlights: list[str] = field(default_factory=list)
     action_needed: str = ""
@@ -93,7 +106,7 @@ class Triage:
     def from_llm(data: dict[str, Any], by: str) -> "Triage":
         severity = data.get("severity")
         return Triage(
-            severity=severity if severity in SEVERITIES else "unknown",
+            severity=Severity(severity) if severity in LLM_SEVERITIES else Severity.UNKNOWN,
             tldr=str(data.get("tldr") or ""),
             highlights=[str(h) for h in data.get("highlights") or []][:5],
             action_needed=str(data.get("action_needed") or ""),
@@ -107,18 +120,24 @@ def looks_security_related(notes: Notes) -> bool:
     return bool(SECURITY_RE.search(notes.text))
 
 
+def unchecked(notes: Notes) -> Triage:
+    return Triage(Severity.UNCHECKED, f"Couldn't check GitHub: {notes.error}.", by="brewnotes")
+
+
 def heuristic(change: Change, notes: Notes) -> Triage:
     text = notes.text
+    if not text and notes.error:
+        return unchecked(notes)
     if not text:
-        sev = "unknown"
+        sev = Severity.UNKNOWN
     elif SECURITY_RE.search(text):
-        sev = "security"
+        sev = Severity.SECURITY
     elif change.major_bump or re.search(r"breaking change|BREAKING", text):
-        sev = "breaking"
+        sev = Severity.BREAKING
     elif BREAKING_RE.search(text):
-        sev = "notable"
+        sev = Severity.NOTABLE
     else:
-        sev = "minor"
+        sev = Severity.MINOR
     return Triage(sev, HEURISTIC_TLDR[sev], cves=sorted(set(ADVISORY_RE.findall(text))), by="heuristic")
 
 
@@ -172,7 +191,8 @@ class Triager:
     def triage(self, change: Change, notes: Notes) -> Triage:
         cache = self.cache_dir / _cache_name(change, notes)
         if self.use_cache and cache.exists():
-            return Triage(**json.loads(cache.read_text()))
+            data = json.loads(cache.read_text())
+            return Triage(**{**data, "severity": Severity(data["severity"])})
         if self.problem or self.ask is None:
             return heuristic(change, notes)
 
@@ -189,6 +209,9 @@ class Triager:
             t = heuristic(change, notes)
             t.tldr += f" (LLM triage failed: {str(e)[:120]})"
             return t
+        if notes.error:
+            # Web lookup found nothing either. Don't cache: the next run may reach GitHub.
+            return unchecked(notes) if t.severity is Severity.UNKNOWN else t
         cache.parent.mkdir(parents=True, exist_ok=True)
         cache.write_text(json.dumps(asdict(t)))
         return t

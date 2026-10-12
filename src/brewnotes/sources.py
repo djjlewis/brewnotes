@@ -3,9 +3,10 @@
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, NamedTuple, Protocol
+from typing import Any, Literal, NamedTuple, Protocol
 
 from .brew import Change
+from .github import GitHubError
 from .versions import same_version, version_from_tag, version_key
 
 MAX_NOTES_CHARS = 60_000
@@ -22,7 +23,8 @@ NOT_OWNERS = {"sponsors", "orgs", "apps", "features", "marketplace", "settings"}
 
 
 class Source(Protocol):
-    """Where release data comes from. Each method returns None when the request fails."""
+    """Where release data comes from. Each method returns None when the repo or file doesn't
+    exist, and raises GitHubError when the request fails."""
 
     def releases(self, repo: str, page: int, per_page: int) -> list[dict[str, Any]] | None: ...
     def root_files(self, repo: str) -> list[str] | None: ...
@@ -60,9 +62,10 @@ class Release:
 class Notes:
     repo: str | None = None
     text: str = ""
-    source: str = ""  # "releases" | "changelog" | ""
+    source: Literal["releases", "changelog", ""] = ""
     links: list[tuple[str, str]] = field(default_factory=list)  # (label, url)
     truncated: bool = False
+    error: str = ""  # why GitHub couldn't be checked; empty when it was
 
 
 def find_repo(change: Change) -> str | None:
@@ -116,7 +119,7 @@ def _list_releases(src: Source, repo: str, change: Change, since: datetime | Non
     """Newest-first releases, paging until past the old version (or the `since` date)."""
     out: list[Release] = []
     for page in range(1, 9):
-        batch = src.releases(repo, page, PAGE_SIZE) or src.releases(repo, page, PAGE_SIZE)  # retry 5xx blips
+        batch = src.releases(repo, page, PAGE_SIZE)
         if not batch:
             break
         page_rels = [r for raw in batch if (r := Release.parse(raw))]
@@ -203,8 +206,21 @@ def fetch_notes(src: Source, change: Change, since: datetime | None = None) -> N
         notes.links.append(("homepage", change.homepage))
     if not notes.repo:
         return notes
+    try:
+        _read_notes(src, notes, notes.repo, change, since)
+    except GitHubError as e:
+        notes.text, notes.source, notes.error = "", "", str(e)
+        notes.links.insert(0, ("releases", f"https://github.com/{notes.repo}/releases"))
+        return notes
 
-    everything = _list_releases(src, notes.repo, change, since)
+    if len(notes.text) > MAX_NOTES_CHARS:
+        notes.text = notes.text[:MAX_NOTES_CHARS] + "\n\n[... truncated ...]"
+        notes.truncated = True
+    return notes
+
+
+def _read_notes(src: Source, notes: Notes, repo: str, change: Change, since: datetime | None) -> None:
+    everything = _list_releases(src, repo, change, since)
     rels = select_releases(everything, change, since)
     if rels:
         notes.text = "\n\n".join(f"## {r.tag} ({_date(r)})\n{r.body or '(no notes)'}" for r in rels)
@@ -214,18 +230,11 @@ def fetch_notes(src: Source, change: Change, since: datetime | None = None) -> N
         old_rel = next((r for r in family if change.old and same_version(r.version, change.old)), None)
         notes.links.insert(0, ("release notes", (new_rel or rels[0]).url))
         if new_rel and old_rel:
-            notes.links.append(
-                ("diff", f"https://github.com/{notes.repo}/compare/{old_rel.tag}...{new_rel.tag}")
-            )
+            notes.links.append(("diff", f"https://github.com/{repo}/compare/{old_rel.tag}...{new_rel.tag}"))
     else:
-        notes.text = _changelog(src, notes.repo, change) or ""
+        notes.text = _changelog(src, repo, change) or ""
         notes.source = "changelog" if notes.text else ""
-        notes.links.insert(0, ("releases", f"https://github.com/{notes.repo}/releases"))
-
-    if len(notes.text) > MAX_NOTES_CHARS:
-        notes.text = notes.text[:MAX_NOTES_CHARS] + "\n\n[... truncated ...]"
-        notes.truncated = True
-    return notes
+        notes.links.insert(0, ("releases", f"https://github.com/{repo}/releases"))
 
 
 def _date(r: Release) -> str:

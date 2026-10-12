@@ -4,7 +4,7 @@ from typing import Any
 from brewnotes.brew import Change
 from brewnotes.llm import Ask, BackendError, BackendUnavailable
 from brewnotes.sources import Notes
-from brewnotes.triage import Triager
+from brewnotes.triage import Severity, Triager
 
 ANSWER = {
     "severity": "breaking",
@@ -110,3 +110,20 @@ def test_a_major_bump_with_no_notes_is_unknown_even_when_the_llm_is_up(tmp_path:
     t = triager.triage(change(old="1.9.0", new="2.0.0"), Notes())
 
     assert t.severity == "unknown"
+
+
+def test_a_package_github_couldnt_check_is_unchecked_with_the_reason(tmp_path: Path) -> None:
+    triager = Triager("api", answers(), None, tmp_path)
+
+    t = triager.triage(change(), Notes(repo="acme/tool", error="rate limited"))
+
+    assert (t.severity, t.tldr) == (Severity.UNCHECKED, "Couldn't check GitHub: rate limited.")
+
+
+def test_web_lookup_that_finds_nothing_after_a_github_failure_is_unchecked(tmp_path: Path) -> None:
+    nothing = {**ANSWER, "severity": "unknown", "tldr": "No notes found."}
+    triager = Triager("claude-cli", answers(), answers(nothing), tmp_path)
+
+    t = triager.triage(change(), Notes(repo="acme/tool", error="rate limited"))
+
+    assert t.severity == Severity.UNCHECKED

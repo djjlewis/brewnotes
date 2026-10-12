@@ -24,6 +24,8 @@ Decisions in this spec were agreed with the owner on 2026-10-11.
 ## Finding the notes
 
 1. Find the GitHub repo in the package's homepage and download URLs. Only `github.com` URLs count, not `docs.github.com`.
+   - Use `gh api` when `gh` is installed and logged in. Otherwise call the GitHub API anonymously, so the tool works without `gh`.
+   - A 404 means the repo or file doesn't exist, which counts as no notes. Any other failure, such as a rate limit or a network error, marks the package "couldn't check" with the reason.
 2. Read the releases after the old version, up to and including the new one, newest first.
    - Skip prereleases unless the new version is one.
    - In a repo that tags several products, keep only the tag family of the new version (`rust-v0.5.0`, not `sdk-v0.4.5`).
@@ -42,13 +44,14 @@ Each package gets one severity, the highest that applies:
 - `notable`: features or improvements a typical user would notice.
 - `minor`: bug fixes, performance, docs, refactors, or dependency bumps.
 - `unknown`: no notes found.
+- `unchecked`: GitHub couldn't be checked, and no notes came from elsewhere. Only brewnotes sets this; Claude never returns it.
 
 Each package also gets a one-sentence TL;DR, up to 5 highlights, the action needed (if any), and the CVE or advisory IDs mentioned. The config's `interests` text tells Claude what the owner counts as notable.
 
 Backends, chosen by `backend` in the config or `--backend`:
 
 - `claude-cli` (default) runs `claude -p` with the owner's subscription login. When no notes were found for a requested package and `web_lookup` is on, Claude may search the web for them and return the URL it used.
-- `api` uses the Anthropic SDK with `api_model` (default `claude-opus-5-5`). It is an option because Max plans now include monthly API credit.
+- `api` uses the Anthropic SDK with `api_model` (default `claude-opus-5-5`). It is an option because Max plans now include monthly API credit. It asks for low effort, because sorting notes into a few severities is a simple task, and it turns on server-side fallback, so notes full of CVE details that trip a safety filter still get an answer.
 - `none` uses keyword heuristics only.
 
 Failure handling:
@@ -62,8 +65,11 @@ Failure handling:
 
 - The terminal shows a summary count, then sections in severity order. Security, breaking, and notable items show the version change, TL;DR, highlights, action, CVEs, and clickable links. Minor and unknown items collapse to one line of names unless `--all` is given.
 - A major version bump is marked. Browser-style and date-stamped versions (a leading number of 50 or more) don't count as major.
+- Packages that couldn't be checked get their own "Couldn't check" section with the reason. When any failed for a rate limit, the run prints one message with the count and says that a logged-in `gh` raises the limit.
+- If `brew update` fails, `preview` prints a warning and reports from the last successful update.
 - Each run with updates saves a markdown report to `reports_dir` (default `~/Documents/brewnotes`) unless given `--no-save`. Minor and unknown items appear there as a table.
 - `brewnotes config` prints the config file path. The first run writes a commented default config.
+- A config file with an unknown setting, a value of the wrong type, an unknown backend, or `workers` below 1 stops the run with a message naming the setting.
 
 ## Acceptance examples
 

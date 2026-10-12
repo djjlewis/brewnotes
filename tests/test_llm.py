@@ -1,5 +1,4 @@
 import json
-import os
 from pathlib import Path
 
 import pytest
@@ -7,16 +6,13 @@ import pytest
 from brewnotes.llm import BackendError, BackendUnavailable, anthropic_api, claude_cli
 from brewnotes.triage import SCHEMA
 
+from .fakes import fake_executable
+
 AUTH_VARS = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_PROFILE", "ANTHROPIC_FEDERATION_RULE_ID"]
 
 
 def fake_claude(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, script: str) -> None:
-    """Puts a stand-in `claude` executable first on PATH."""
-    exe = tmp_path / "bin" / "claude"
-    exe.parent.mkdir()
-    exe.write_text(f"#!/bin/sh\n{script}\n")
-    exe.chmod(0o755)
-    monkeypatch.setenv("PATH", f"{exe.parent}{os.pathsep}{os.environ['PATH']}")
+    fake_executable(tmp_path, monkeypatch, "claude", script)
 
 
 def error_envelope(result: str) -> str:

@@ -1,32 +1,35 @@
 """Rendering triaged updates to the terminal (rich) and to markdown."""
 
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import NamedTuple
 
 from rich.console import Console
 from rich.markup import escape
 
 from .brew import Change
+from .github import RATE_LIMITED
 from .sources import Notes
-from .triage import SEVERITIES, Triage
+from .triage import Severity, Triage
 
-ICONS = {"security": "🔴", "breaking": "🟠", "notable": "🟢", "minor": "⚪", "unknown": "❔"}
-TITLES = {
-    "security": "Security fixes",
-    "breaking": "Breaking changes / action needed",
-    "notable": "Notable enhancements",
-    "minor": "Minor (fixes & tweaks)",
-    "unknown": "Couldn't find notes",
+
+class Section(NamedTuple):
+    icon: str
+    title: str
+    style: str
+    collapsed: bool  # names only in the terminal, a table in markdown
+
+
+SECTIONS = {
+    Severity.SECURITY: Section("🔴", "Security fixes", "bold red", False),
+    Severity.BREAKING: Section("🟠", "Breaking changes / action needed", "bold yellow", False),
+    Severity.NOTABLE: Section("🟢", "Notable enhancements", "bold green", False),
+    Severity.MINOR: Section("⚪", "Minor (fixes & tweaks)", "dim", True),
+    Severity.UNKNOWN: Section("❔", "Couldn't find notes", "dim", True),
+    Severity.UNCHECKED: Section("⚠️", "Couldn't check", "yellow", True),
 }
-STYLES = {
-    "security": "bold red",
-    "breaking": "bold yellow",
-    "notable": "bold green",
-    "minor": "dim",
-    "unknown": "dim",
-}
-COLLAPSED = ("minor", "unknown")
 
 
 @dataclass(frozen=True)
@@ -46,12 +49,26 @@ def _ver(c: Change) -> str:
     return f"{c.old} → {c.new}" if c.old else f"→ {c.new}"
 
 
-def grouped(items: list[Item]) -> dict[str, list[Item]]:
+def grouped(items: list[Item]) -> dict[Severity, list[Item]]:
     """Items by severity, most severe first, sorted by name within each group."""
-    groups: dict[str, list[Item]] = {s: [] for s in SEVERITIES}
+    groups: dict[Severity, list[Item]] = {s: [] for s in Severity}
     for it in sorted(items, key=lambda i: i.change.name):
         groups[it.triage.severity].append(it)
     return groups
+
+
+def fetch_problem(items: list[Item]) -> str | None:
+    """One line summing up the packages GitHub couldn't be checked for, with the fix for a
+    rate limit. None when every package was checked."""
+    reasons = Counter(i.notes.error for i in items if i.notes.error)
+    if not reasons:
+        return None
+    n = sum(reasons.values())
+    detail = ", ".join(f"{reason}: {count}" for reason, count in reasons.most_common())
+    message = f"GitHub couldn't be checked for {n} package{'s' if n != 1 else ''} ({detail})."
+    if RATE_LIMITED in reasons:
+        message += " Run `gh auth login` for a higher rate limit, or try again later."
+    return message
 
 
 def summary_line(items: list[Item]) -> str:
@@ -72,16 +89,29 @@ def render_terminal(
     for sev, group in grouped(items).items():
         if not group:
             continue
-        con.print(f"{ICONS[sev]} [{STYLES[sev]}]{TITLES[sev]}[/] ({len(group)})")
-        if sev in COLLAPSED and not show_all:
+        sec = SECTIONS[sev]
+        con.print(f"{sec.icon} [{sec.style}]{sec.title}[/] ({len(group)})")
+        if sev is Severity.UNCHECKED and not show_all:
+            _print_unchecked(con, group)
+        elif sec.collapsed and not show_all:
             con.print(f"   [dim]{', '.join(_name_link(i) for i in group)}[/dim]\n")
         else:
             for it in group:
                 _print_item(con, it)
     if md_path:
         con.print(f"[dim]Full report: {md_path}[/]")
-    if not show_all and any(i.triage.severity in COLLAPSED for i in items):
-        con.print("[dim]Use --all to expand minor/unknown items.[/]")
+    if not show_all and any(SECTIONS[i.triage.severity].collapsed for i in items):
+        con.print("[dim]Use --all to expand the collapsed sections.[/]")
+
+
+def _print_unchecked(con: Console, group: list[Item]) -> None:
+    """Names grouped by the reason GitHub couldn't be checked."""
+    by_reason: dict[str, list[Item]] = {}
+    for it in group:
+        by_reason.setdefault(it.notes.error, []).append(it)
+    for reason, its in by_reason.items():
+        con.print(f"   [dim]{escape(reason)}: {', '.join(_name_link(i) for i in its)}[/dim]")
+    con.print()
 
 
 def _name_link(it: Item) -> str:
@@ -115,8 +145,9 @@ def render_markdown(items: list[Item], title: str, now: datetime) -> str:
     for sev, group in grouped(items).items():
         if not group:
             continue
-        out += [f"## {ICONS[sev]} {TITLES[sev]} ({len(group)})", ""]
-        out += _md_table(group) if sev in COLLAPSED else [line for it in group for line in _md_item(it)]
+        sec = SECTIONS[sev]
+        out += [f"## {sec.icon} {sec.title} ({len(group)})", ""]
+        out += _md_table(group) if sec.collapsed else [line for it in group for line in _md_item(it)]
     return "\n".join(out)
 
 

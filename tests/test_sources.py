@@ -2,6 +2,7 @@ from datetime import datetime
 from typing import Any
 
 from brewnotes.brew import Change
+from brewnotes.github import GitHubError
 from brewnotes.sources import PAGE_SIZE, fetch_notes
 
 REPO_URL = "https://github.com/acme/tool/archive/refs/tags/v1.3.0.tar.gz"
@@ -10,11 +11,19 @@ REPO_URL = "https://github.com/acme/tool/archive/refs/tags/v1.3.0.tar.gz"
 class FakeGitHub:
     """Stands in for the GitHub API: serves canned releases (newest first) and repo files."""
 
-    def __init__(self, releases: list[dict[str, Any]] | None = None, files: dict[str, str] | None = None):
+    def __init__(
+        self,
+        releases: list[dict[str, Any]] | None = None,
+        files: dict[str, str] | None = None,
+        fail: GitHubError | None = None,
+    ):
         self._releases = releases or []
         self._files = files or {}
+        self._fail = fail
 
     def releases(self, repo: str, page: int, per_page: int) -> list[dict[str, Any]] | None:
+        if self._fail:
+            raise self._fail
         return self._releases[(page - 1) * per_page : page * per_page]
 
     def root_files(self, repo: str) -> list[str] | None:
@@ -215,3 +224,17 @@ def test_changelog_section_ends_at_an_old_version_heading_of_a_higher_level() ->
     notes = fetch_notes(gh, change("2.0.0", "2.1.0"))
 
     assert notes.text == "## 2.1.0\n- a\n"
+
+
+def test_a_failed_github_request_is_recorded_instead_of_reading_as_no_notes() -> None:
+    gh = FakeGitHub(fail=GitHubError("rate limited"))
+
+    notes = fetch_notes(gh, change("1.2.0", "1.3.0"))
+
+    assert (notes.text, notes.error) == ("", "rate limited")
+
+
+def test_a_repo_with_nothing_to_read_has_no_notes_and_no_error() -> None:
+    notes = fetch_notes(FakeGitHub(), change("1.2.0", "1.3.0"))
+
+    assert (notes.text, notes.error) == ("", "")

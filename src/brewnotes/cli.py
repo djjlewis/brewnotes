@@ -5,15 +5,16 @@ import os
 import re
 import sys
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from rich.console import Console
 
 from . import brew, llm
-from .config import Config, Paths, load_config
+from .config import BACKENDS, Config, ConfigError, Paths, load_config
 from .github import GitHub
-from .report import Item, render_terminal, save_markdown
+from .report import Item, fetch_problem, render_terminal, save_markdown
 from .sources import fetch_notes
 from .triage import SCHEMA, Triager, heuristic, looks_security_related
 
@@ -80,6 +81,8 @@ class Run:
             self.err.print(
                 f"[bold red]LLM triage unavailable, used keyword heuristics:[/] {self.triager.problem}"
             )
+        if problem := fetch_problem(items):
+            self.err.print(f"[yellow]{problem}[/]")
         now = datetime.now()
         save = items and not self.args.no_save
         md = save_markdown(items, title, self.cfg.reports_path, mode, now) if save else None
@@ -89,7 +92,9 @@ class Run:
 def cmd_preview(run: Run) -> None:
     if not run.args.no_update:
         with run.err.status("brew update…"):
-            brew.update()
+            failed = brew.update()
+        if failed:
+            run.err.print(f"[yellow]brew update failed, reporting from the last update:[/] {failed}")
     snap = brew.installed()
     if run.load_snapshot() is None:  # so the first recap has something to diff against
         run.save_snapshot(snap)
@@ -125,7 +130,7 @@ def build_parser() -> argparse.ArgumentParser:
     recap.add_argument("--since", help="e.g. 7d, 48h, 2w or 2026-10-01 (ignores the snapshot)")
     for p in (preview, recap):
         p.add_argument("--all", action="store_true", help="expand minor/unknown items")
-        p.add_argument("--backend", choices=["claude-cli", "api", "none"], help="override the config backend")
+        p.add_argument("--backend", choices=BACKENDS, help="override the config backend")
         p.add_argument("--no-cache", action="store_true", help="re-triage even if cached")
         p.add_argument("--no-save", action="store_true", help="don't write a markdown report")
         p.add_argument("--deps", action="store_true", help="report all changed dependencies")
@@ -143,12 +148,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     paths = Paths.from_env(os.environ, Path.home())
-    cfg = load_config(paths.config)
+    try:
+        cfg = load_config(paths.config)
+    except ConfigError as e:
+        sys.exit(f"brewnotes: {e}")
     if args.cmd == "config":
         print(paths.config)
         return
-    cfg.backend = args.backend or cfg.backend
-    cfg.include_dependencies = cfg.include_dependencies or args.deps
+    cfg = replace(
+        cfg, backend=args.backend or cfg.backend, include_dependencies=cfg.include_dependencies or args.deps
+    )
     try:
         (cmd_preview if args.cmd == "preview" else cmd_recap)(Run(cfg, paths, args))
     except KeyboardInterrupt:
