@@ -13,12 +13,12 @@
 
 ## Install
 
-You need `uv`. The default backend also needs the `claude` CLI, logged in.
+brewnotes runs on macOS with Homebrew. You need [`uv`](https://docs.astral.sh/uv/). The default backend also needs the [Claude Code](https://claude.com/claude-code) `claude` CLI, logged in.
 
 `gh` is optional. Without a logged-in `gh`, `brewnotes` reads GitHub anonymously, which GitHub limits to 60 requests an hour. That covers a typical `preview`, but a long `recap` can run out. Run `gh auth login` to raise the limit to 5,000.
 
 ```bash
-uv tool install --editable .
+uv tool install git+https://github.com/djjlewis/brewnotes
 ```
 
 ## Use
@@ -77,4 +77,16 @@ Pass `--backend` to override the backend for one run.
 
 ## Develop
 
+Clone the repo and install it in editable mode, so your changes take effect without reinstalling:
+
+```bash
+git clone https://github.com/djjlewis/brewnotes
+cd brewnotes
+uv tool install --editable .
+```
+
 [AGENTS.md](AGENTS.md) lists the checks, and [the coding guidelines](docs/coding-guidelines.md) list the standards.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
