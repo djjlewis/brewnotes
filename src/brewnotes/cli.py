@@ -15,7 +15,7 @@ from . import brew, llm
 from .config import BACKENDS, Config, ConfigError, Paths, ensure_config, load_config
 from .github import GitHub
 from .report import Item, fetch_problem, render_terminal, save_markdown
-from .sources import fetch_notes
+from .sources import Notes, fetch_notes
 from .triage import SCHEMA, Triager, heuristic, looks_security_related
 
 UNITS = {"h": "hours", "d": "days", "w": "weeks"}
@@ -51,6 +51,7 @@ class Run:
         self.err = Console(stderr=True)
         self.github = GitHub()
         self.triager = make_triager(cfg, paths, use_cache=not args.no_cache)
+        self.dependency_errors: list[str] = []  # reasons for hidden dependencies GitHub failed on
 
     def load_snapshot(self) -> brew.Snapshot | None:
         p = self.paths.snapshot
@@ -66,13 +67,16 @@ class Run:
             self.err.status(f"Reading release notes for {len(changes)} packages…"),
             ThreadPoolExecutor(max_workers=self.cfg.workers) as pool,
         ):
-            return [i for i in pool.map(lambda c: self._one(c, since), changes) if i]
+            results = list(pool.map(lambda c: self._one(c, since), changes))
+        self.dependency_errors = [r.error for r in results if isinstance(r, Notes) and r.error]
+        return [r for r in results if isinstance(r, Item)]
 
-    def _one(self, c: brew.Change, since: datetime | None) -> Item | None:
+    def _one(self, c: brew.Change, since: datetime | None) -> Item | Notes:
+        """An Item for the report, or the Notes of a dependency that stays hidden."""
         notes = fetch_notes(self.github, c, since)
         # Dependencies only make the report if they look security-related.
         if not c.requested and not self.cfg.include_dependencies and not looks_security_related(notes):
-            return None
+            return notes
         t = self.triager.triage(c, notes) if self.triager else heuristic(c, notes)
         return Item(c, notes, t)
 
@@ -81,7 +85,7 @@ class Run:
             self.err.print(
                 f"[bold red]LLM triage unavailable, used keyword heuristics:[/] {self.triager.problem}"
             )
-        if problem := fetch_problem(items):
+        if problem := fetch_problem(items, self.dependency_errors):
             self.err.print(f"[yellow]{problem}[/]")
         now = datetime.now()
         save = items and not self.args.no_save

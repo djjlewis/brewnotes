@@ -31,3 +31,18 @@ def test_the_message_counts_only_packages_left_unchecked() -> None:
     message = fetch_problem([item("a", "rate limited"), found_on_the_web])
 
     assert message is not None and "for 1 package " in message
+
+
+def test_unchecked_dependencies_are_counted_but_not_listed() -> None:
+    items = [item("a", "rate limited"), item("b", "rate limited")]
+
+    message = fetch_problem(items, dependency_errors=["rate limited"] * 3)
+
+    assert message is not None
+    assert "2 packages and 3 dependencies (rate limited: 5)" in message and "gh auth login" in message
+
+
+def test_a_single_unchecked_dependency_still_gets_the_message() -> None:
+    message = fetch_problem([item("a")], dependency_errors=["rate limited"])
+
+    assert message is not None and "for 1 dependency (rate limited: 1)" in message

@@ -1,6 +1,7 @@
 """Rendering triaged updates to the terminal (rich) and to markdown."""
 
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -56,18 +57,30 @@ def grouped(items: list[Item]) -> dict[Severity, list[Item]]:
     return groups
 
 
-def fetch_problem(items: list[Item]) -> str | None:
-    """One line summing up the packages left unchecked because GitHub failed, with the fix for a
-    rate limit. None when there are none."""
-    reasons = Counter(i.notes.error for i in items if i.triage.severity is Severity.UNCHECKED)
+def fetch_problem(items: list[Item], dependency_errors: Sequence[str] = ()) -> str | None:
+    """One line summing up what GitHub couldn't be checked for, with the fix for a rate limit.
+    Counts the shown packages left unchecked and, separately, the hidden dependencies whose
+    fetch failed (`dependency_errors` holds their reasons). None when there are none."""
+    package_errors = [i.notes.error for i in items if i.triage.severity is Severity.UNCHECKED]
+    reasons = Counter([*package_errors, *dependency_errors])
     if not reasons:
         return None
-    n = sum(reasons.values())
+    counts = [
+        _count(len(package_errors), "package"),
+        _count(len(dependency_errors), "dependency", "dependencies"),
+    ]
     detail = ", ".join(f"{reason}: {count}" for reason, count in reasons.most_common())
-    message = f"GitHub couldn't be checked for {n} package{'s' if n != 1 else ''} ({detail})."
+    message = f"GitHub couldn't be checked for {' and '.join(c for c in counts if c)} ({detail})."
     if RATE_LIMITED in reasons:
         message += " Run `gh auth login` for a higher rate limit, or try again later."
     return message
+
+
+def _count(n: int, one: str, many: str = "") -> str:
+    """'' for 0, else '1 package' or '3 packages'."""
+    if not n:
+        return ""
+    return f"{n} {one if n == 1 else many or one + 's'}"
 
 
 def summary_line(items: list[Item]) -> str:

@@ -47,7 +47,7 @@ The recap reuses the cached triage from the preview, so it costs nothing extra.
 1. `preview` reads `brew outdated`. `recap` compares installed versions with the snapshot saved by the last run. With `--since`, it uses install times instead.
 2. The report covers formulae you installed yourself and all casks. A dependency appears only when its notes mention security. Add `--deps` to include every dependency.
 3. `brewnotes` finds the GitHub repo in the Homebrew metadata. It reads every release between your version and the new one. If the repo has no releases, it reads the section of `CHANGELOG`, `NEWS`, or a similar file.
-4. If GitHub can't be checked, for example because of the rate limit, the package appears under "Couldn't check" with the reason, instead of looking like it has no notes.
+4. If GitHub can't be checked, for example because of the rate limit, the package appears under "Couldn't check" with the reason, instead of looking like it has no notes. Dependencies that couldn't be checked aren't listed, but the run's message counts them.
 5. Claude assigns each package a severity and writes the summary. If no notes were found, the `claude-cli` backend lets Claude search the web for them. Results are cached in `~/.cache/brewnotes/` per version range.
 
 ## Configure

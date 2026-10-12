@@ -65,7 +65,7 @@ Failure handling:
 
 - The terminal shows a summary count, then sections in severity order. Security, breaking, and notable items show the version change, TL;DR, highlights, action, CVEs, and clickable links. Minor and unknown items collapse to one line of names unless `--all` is given.
 - A major version bump is marked. Browser-style and date-stamped versions (a leading number of 50 or more) don't count as major.
-- Packages that couldn't be checked get their own "Couldn't check" section with the reason. When any failed for a rate limit, the run prints one message with the count and says that a logged-in `gh` raises the limit.
+- Packages that couldn't be checked get their own "Couldn't check" section with the reason. The run prints one message with the count. Hidden dependencies that couldn't be checked are not listed, but the message counts them separately ("27 packages and 39 dependencies"). When any failed for a rate limit, the message says that a logged-in `gh` raises the limit.
 - If `brew update` fails, `preview` prints a warning and reports from the last successful update.
 - Each run with updates saves a markdown report to `reports_dir` (default `~/Documents/brewnotes`) unless given `--no-save`. Minor and unknown items appear there as a table.
 - `brewnotes config` prints the config file path. The first run writes a commented default config.
