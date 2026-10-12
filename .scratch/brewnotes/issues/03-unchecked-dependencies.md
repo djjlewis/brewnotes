@@ -23,6 +23,10 @@ Boundary under test: `report.fetch_problem`, which takes the shown items and the
 
 ## Comments
 
-Implemented test-first. Examples 1 and 2 have tests at `report.fetch_problem` that failed before the change. Example 3 holds because hidden dependencies never become report items. Only their failure reasons reach `fetch_problem`.
+Examples 1 and 2 have tests at `report.fetch_problem`, and example 3 has a test at `cli.split_hidden_dependencies`. Each test failed before its change.
 
-Verification: the checks pass with 59 tests. A real `GH_TOKEN=invalid brewnotes recap --since 21d --backend none --no-save` printed "GitHub couldn't be checked for 27 packages and 39 dependencies (rate limited: 66)" with the `gh auth login` hint. The "Couldn't check" section listed the 27 packages only.
+The message counts hidden dependencies for every failure reason, not only rate limits, because the run's message already covered every reason.
+
+`/code-review` of commit 8d8f77d found no spec problems. Its standards findings are fixed. `Run.process` returns the dependency failures with the items instead of storing them on `Run`, and the dependency filter is now the pure function `split_hidden_dependencies`, which the example 3 test drives.
+
+The checks pass with 60 tests. A real `GH_TOKEN=invalid brewnotes recap --since 21d --backend none --no-save` printed "GitHub couldn't be checked for 27 packages and 39 dependencies (rate limited: 66)" with the `gh auth login` hint. The "Couldn't check" section listed the 27 packages only.

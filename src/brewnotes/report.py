@@ -1,7 +1,6 @@
 """Rendering triaged updates to the terminal (rich) and to markdown."""
 
 from collections import Counter
-from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -57,7 +56,7 @@ def grouped(items: list[Item]) -> dict[Severity, list[Item]]:
     return groups
 
 
-def fetch_problem(items: list[Item], dependency_errors: Sequence[str] = ()) -> str | None:
+def fetch_problem(items: list[Item], dependency_errors: list[str]) -> str | None:
     """One line summing up what GitHub couldn't be checked for, with the fix for a rate limit.
     Counts the shown packages left unchecked and, separately, the hidden dependencies whose
     fetch failed (`dependency_errors` holds their reasons). None when there are none."""
@@ -65,22 +64,20 @@ def fetch_problem(items: list[Item], dependency_errors: Sequence[str] = ()) -> s
     reasons = Counter([*package_errors, *dependency_errors])
     if not reasons:
         return None
-    counts = [
-        _count(len(package_errors), "package"),
-        _count(len(dependency_errors), "dependency", "dependencies"),
-    ]
+    counts = []
+    if package_errors:
+        counts.append(_plural(len(package_errors), "package", "packages"))
+    if dependency_errors:
+        counts.append(_plural(len(dependency_errors), "dependency", "dependencies"))
     detail = ", ".join(f"{reason}: {count}" for reason, count in reasons.most_common())
-    message = f"GitHub couldn't be checked for {' and '.join(c for c in counts if c)} ({detail})."
+    message = f"GitHub couldn't be checked for {' and '.join(counts)} ({detail})."
     if RATE_LIMITED in reasons:
         message += " Run `gh auth login` for a higher rate limit, or try again later."
     return message
 
 
-def _count(n: int, one: str, many: str = "") -> str:
-    """'' for 0, else '1 package' or '3 packages'."""
-    if not n:
-        return ""
-    return f"{n} {one if n == 1 else many or one + 's'}"
+def _plural(n: int, one: str, many: str) -> str:
+    return f"{n} {one if n == 1 else many}"
 
 
 def summary_line(items: list[Item]) -> str:

@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import NamedTuple
 
 from rich.console import Console
 
@@ -16,7 +17,7 @@ from .config import BACKENDS, Config, ConfigError, Paths, ensure_config, load_co
 from .github import GitHub
 from .report import Item, fetch_problem, render_terminal, save_markdown
 from .sources import Notes, fetch_notes
-from .triage import SCHEMA, Triager, heuristic, looks_security_related
+from .triage import SCHEMA, Triage, Triager, heuristic, looks_security_related
 
 UNITS = {"h": "hours", "d": "days", "w": "weeks"}
 
@@ -45,13 +46,32 @@ def make_triager(cfg: Config, paths: Paths, use_cache: bool) -> Triager | None:
     return Triager(cfg.backend, ask, ask_web, paths.cache, cfg.interests, use_cache, problem)
 
 
+class Processed(NamedTuple):
+    items: list[Item]
+    dependency_errors: list[str]  # failure reasons for dependencies the report doesn't show
+
+
+def split_hidden_dependencies(
+    fetched: list[tuple[brew.Change, Notes]], include_dependencies: bool
+) -> tuple[list[tuple[brew.Change, Notes]], list[str]]:
+    """Splits off dependencies the report doesn't show: those whose notes don't look
+    security-related, unless `include_dependencies`. Returns what to show, and the failure
+    reasons of hidden dependencies GitHub couldn't be checked for, so they can still be counted."""
+    shown, dependency_errors = [], []
+    for change, notes in fetched:
+        if change.requested or include_dependencies or looks_security_related(notes):
+            shown.append((change, notes))
+        elif notes.error:
+            dependency_errors.append(notes.error)
+    return shown, dependency_errors
+
+
 class Run:
     def __init__(self, cfg: Config, paths: Paths, args: argparse.Namespace) -> None:
         self.cfg, self.paths, self.args = cfg, paths, args
         self.err = Console(stderr=True)
         self.github = GitHub()
         self.triager = make_triager(cfg, paths, use_cache=not args.no_cache)
-        self.dependency_errors: list[str] = []  # reasons for hidden dependencies GitHub failed on
 
     def load_snapshot(self) -> brew.Snapshot | None:
         p = self.paths.snapshot
@@ -61,31 +81,28 @@ class Run:
         self.paths.snapshot.parent.mkdir(parents=True, exist_ok=True)
         self.paths.snapshot.write_text(brew.snapshot_to_json(snap))
 
-    def process(self, changes: list[brew.Change], since: datetime | None) -> list[Item]:
+    def process(self, changes: list[brew.Change], since: datetime | None) -> Processed:
+        """Fetches notes for every change, then triages the ones the report shows."""
         changes = [c for c in changes if c.name not in self.cfg.ignore]
         with (
             self.err.status(f"Reading release notes for {len(changes)} packages…"),
             ThreadPoolExecutor(max_workers=self.cfg.workers) as pool,
         ):
-            results = list(pool.map(lambda c: self._one(c, since), changes))
-        self.dependency_errors = [r.error for r in results if isinstance(r, Notes) and r.error]
-        return [r for r in results if isinstance(r, Item)]
+            fetched = list(pool.map(lambda c: (c, fetch_notes(self.github, c, since)), changes))
+            shown, dependency_errors = split_hidden_dependencies(fetched, self.cfg.include_dependencies)
+            items = list(pool.map(lambda cn: Item(cn[0], cn[1], self._triage(*cn)), shown))
+        return Processed(items, dependency_errors)
 
-    def _one(self, c: brew.Change, since: datetime | None) -> Item | Notes:
-        """An Item for the report, or the Notes of a dependency that stays hidden."""
-        notes = fetch_notes(self.github, c, since)
-        # Dependencies only make the report if they look security-related.
-        if not c.requested and not self.cfg.include_dependencies and not looks_security_related(notes):
-            return notes
-        t = self.triager.triage(c, notes) if self.triager else heuristic(c, notes)
-        return Item(c, notes, t)
+    def _triage(self, change: brew.Change, notes: Notes) -> Triage:
+        return self.triager.triage(change, notes) if self.triager else heuristic(change, notes)
 
-    def finish(self, items: list[Item], mode: str, title: str) -> None:
+    def finish(self, processed: Processed, mode: str, title: str) -> None:
+        items = processed.items
         if self.triager and self.triager.problem:
             self.err.print(
                 f"[bold red]LLM triage unavailable, used keyword heuristics:[/] {self.triager.problem}"
             )
-        if problem := fetch_problem(items, self.dependency_errors):
+        if problem := fetch_problem(items, processed.dependency_errors):
             self.err.print(f"[yellow]{problem}[/]")
         now = datetime.now()
         save = items and not self.args.no_save
@@ -102,8 +119,8 @@ def cmd_preview(run: Run) -> None:
     snap = brew.installed()
     if run.load_snapshot() is None:  # so the first recap has something to diff against
         run.save_snapshot(snap)
-    items = run.process(brew.outdated(snap, greedy=run.args.greedy), None)
-    run.finish(items, "preview", "brew preview: pending updates")
+    processed = run.process(brew.outdated(snap, greedy=run.args.greedy), None)
+    run.finish(processed, "preview", "brew preview: pending updates")
 
 
 def cmd_recap(run: Run) -> None:
@@ -119,9 +136,9 @@ def cmd_recap(run: Run) -> None:
             )
         changes = brew.changed_since(current, since, before)
         title = f"brew recap: changes since {since:%Y-%m-%d}"
-    items = run.process(changes, since)
+    processed = run.process(changes, since)
     run.save_snapshot(current)
-    run.finish(items, "recap", title)
+    run.finish(processed, "recap", title)
 
 
 def build_parser() -> argparse.ArgumentParser:
