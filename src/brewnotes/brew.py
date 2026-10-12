@@ -4,7 +4,7 @@ import json
 import subprocess
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
-from typing import Any, Literal, cast
+from typing import Any, Literal, cast, get_args
 
 from .versions import clean_version, leading_int
 
@@ -19,8 +19,8 @@ class Installed:
     urls: list[str] = field(default_factory=list)  # candidates for locating the source repo
 
 
-Snapshot = dict[str, Installed]
-Kind = Literal["formula", "cask"]  # keyed "formula:name" / "cask:name"
+Snapshot = dict[str, Installed]  # keyed "formula:name" or "cask:name"
+Kind = Literal["formula", "cask"]
 
 
 @dataclass
@@ -73,6 +73,8 @@ def changed_since(snap: Snapshot, since: datetime, before: Snapshot | None = Non
 
 def _change(key: str, old: str | None, now: Installed) -> Change:
     kind, name = key.split(":", 1)
+    if kind not in get_args(Kind):
+        raise ValueError(f"snapshot key {key!r} is not formula:name or cask:name")
     return Change(
         name=name,
         kind=cast(Kind, kind),

@@ -8,7 +8,7 @@
 🟢 Notable enhancements     features you would want to know about
 ⚪ Minor                    bug fixes and tweaks, names only (use --all)
 ❔ Couldn't find notes      names only, with links
-⚠️ Couldn't check          GitHub failed; names grouped by the reason
+⚠️ Couldn't check          GitHub failed, names grouped by the reason
 ```
 
 ## Install
@@ -63,7 +63,7 @@ The first run writes `~/.config/brewnotes/config.toml` with comments. The settin
 | `web_lookup` | `true` | Lets the `claude-cli` backend search the web when no GitHub notes exist. |
 | `workers` | `4` | How many packages to fetch and triage at once. |
 
-`brewnotes` checks the file when it starts. An unknown setting or a value of the wrong type stops the run with a message that names the setting.
+`brewnotes` validates the file when it starts. An unknown setting or a value of the wrong type stops the run with a message that names the setting.
 
 Pass `--backend` to override the backend for one run.
 

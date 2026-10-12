@@ -14,14 +14,14 @@ from .sources import Notes
 
 
 class Severity(StrEnum):
-    """Most severe first; the report shows sections in this order."""
+    """Most severe first. The report shows sections in this order."""
 
     SECURITY = "security"
     BREAKING = "breaking"
     NOTABLE = "notable"
     MINOR = "minor"
     UNKNOWN = "unknown"
-    UNCHECKED = "unchecked"  # GitHub couldn't be checked; set by brewnotes, never by Claude
+    UNCHECKED = "unchecked"  # GitHub couldn't be checked. Set by brewnotes, never by Claude.
 
 
 LLM_SEVERITIES = [s.value for s in Severity if s is not Severity.UNCHECKED]
@@ -121,6 +121,7 @@ def looks_security_related(notes: Notes) -> bool:
 
 
 def unchecked(notes: Notes) -> Triage:
+    """The result for a package GitHub couldn't be checked for, with the reason as the TL;DR."""
     return Triage(Severity.UNCHECKED, f"Couldn't check GitHub: {notes.error}.", by="brewnotes")
 
 
@@ -149,9 +150,7 @@ def build_prompt(change: Change, notes: Notes, interests: str) -> str:
         )
     else:
         section = NOTES_MISSING_WEB.format(
-            repo=f" (GitHub repo {notes.repo} has no releases or changelog for this range)"
-            if notes.repo
-            else "",
+            repo=_why_no_notes(notes),
             old=change.old or "the previous version",
             new=change.new,
             homepage=change.homepage or "unknown",
@@ -166,6 +165,14 @@ def build_prompt(change: Change, notes: Notes, interests: str) -> str:
         major="  [MAJOR VERSION BUMP]" if change.major_bump else "",
         notes_section=section,
     )
+
+
+def _why_no_notes(notes: Notes) -> str:
+    if notes.error:
+        return f" (GitHub couldn't be checked: {notes.error})"
+    if notes.repo:
+        return f" (GitHub repo {notes.repo} has no releases or changelog for this range)"
+    return ""
 
 
 class Triager:
@@ -190,7 +197,9 @@ class Triager:
 
     def triage(self, change: Change, notes: Notes) -> Triage:
         cache = self.cache_dir / _cache_name(change, notes)
-        if self.use_cache and cache.exists():
+        # A GitHub failure has no notes text, so it shares a cache key with "no notes exist".
+        # Skip the cache both ways, so the failure shows and the next run tries GitHub again.
+        if self.use_cache and not notes.error and cache.exists():
             data = json.loads(cache.read_text())
             return Triage(**{**data, "severity": Severity(data["severity"])})
         if self.problem or self.ask is None:
@@ -210,7 +219,6 @@ class Triager:
             t.tldr += f" (LLM triage failed: {str(e)[:120]})"
             return t
         if notes.error:
-            # Web lookup found nothing either. Don't cache: the next run may reach GitHub.
             return unchecked(notes) if t.severity is Severity.UNKNOWN else t
         cache.parent.mkdir(parents=True, exist_ok=True)
         cache.write_text(json.dumps(asdict(t)))

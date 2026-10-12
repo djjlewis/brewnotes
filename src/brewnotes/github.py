@@ -1,7 +1,8 @@
 """GitHub REST access through `gh` when it's installed and logged in, otherwise anonymously.
 
-Anonymous access needs no setup but allows 60 requests an hour; a logged-in `gh` allows 5,000."""
+Anonymous access needs no setup but allows 60 requests an hour. A logged-in `gh` allows 5,000."""
 
+import http.client
 import json
 import re
 import shutil
@@ -10,22 +11,18 @@ import urllib.error
 import urllib.request
 from typing import Any
 
-RATE_LIMITED = "rate limited"
-
-
-class GitHubError(RuntimeError):
-    """A request failed for a reason other than "not found". The message is the reason."""
+from .sources import RATE_LIMITED, FetchError
 
 
 class GitHub:
     """Implements `sources.Source`. Methods return None when the repo or file doesn't exist and
-    raise GitHubError for any other failure, after one retry for server errors."""
+    raise FetchError for any other failure, after one retry for server errors."""
 
     def __init__(self) -> None:
         gh = shutil.which("gh")
-        logged_in = (
-            gh and subprocess.run([gh, "auth", "status"], capture_output=True, check=False).returncode == 0
-        )
+        # Ask about github.com only: `gh auth status` fails if any other configured host is logged out.
+        status = [gh, "auth", "status", "--hostname", "github.com"] if gh else []
+        logged_in = gh and subprocess.run(status, capture_output=True, check=False).returncode == 0
         self.gh = gh if logged_in else None
 
     def releases(self, repo: str, page: int, per_page: int) -> list[dict[str, Any]] | None:
@@ -52,7 +49,7 @@ class GitHub:
             try:
                 return self._fetch_once(path, accept)
             except _ServerError as e:
-                raise GitHubError(str(e)) from e
+                raise FetchError(str(e)) from e
 
     def _fetch_once(self, path: str, accept: str) -> str | None:
         if self.gh:
@@ -62,30 +59,32 @@ class GitHub:
             if p.returncode == 0:
                 return p.stdout
             status = re.search(r"HTTP (\d{3})", p.stderr)
-            _raise_unless_missing(int(status.group(1)) if status else None, p.stderr)
+            _raise_unless_not_found(int(status.group(1)) if status else None, p.stderr)
             return None
         req = urllib.request.Request(f"https://api.github.com/{path}", headers={"Accept": accept})
         try:
             with urllib.request.urlopen(req, timeout=20) as r:
                 return str(r.read().decode("utf-8", "replace"))
         except urllib.error.HTTPError as e:
-            _raise_unless_missing(e.code, e.read().decode("utf-8", "replace"))
-            return None
-        except (urllib.error.URLError, TimeoutError) as e:
-            raise GitHubError(f"network error: {e}") from e
+            code, detail = e.code, e.read().decode("utf-8", "replace")
+        except (OSError, http.client.HTTPException) as e:  # URLError, timeouts, resets, short reads
+            raise FetchError(f"network error: {e}") from e
+        _raise_unless_not_found(code, detail)
+        return None
 
 
 class _ServerError(Exception):
     """A 5xx response, worth one retry."""
 
 
-def _raise_unless_missing(status: int | None, detail: str) -> None:
-    """Returns for a 404, which means the repo or file doesn't exist. Raises for anything else."""
+def _raise_unless_not_found(status: int | None, detail: str) -> None:
+    """Returns for a 404, which means the repo or file doesn't exist. Otherwise raises FetchError
+    (rate limit, other HTTP errors) or _ServerError (5xx)."""
     if status == 404:
         return
     if status == 429 or (status == 403 and "rate limit" in detail.lower()):
-        raise GitHubError(RATE_LIMITED)
+        raise FetchError(RATE_LIMITED)
     if status and status >= 500:
         raise _ServerError(f"GitHub server error {status}")
     first_line = detail.strip().splitlines()[0] if detail.strip() else "no detail"
-    raise GitHubError(f"HTTP {status}: {first_line}" if status else first_line.removeprefix("gh: "))
+    raise FetchError(f"HTTP {status}: {first_line}" if status else first_line.removeprefix("gh: "))

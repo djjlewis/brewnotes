@@ -11,17 +11,13 @@ from .fakes import fake_executable
 AUTH_VARS = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_PROFILE", "ANTHROPIC_FEDERATION_RULE_ID"]
 
 
-def fake_claude(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, script: str) -> None:
-    fake_executable(tmp_path, monkeypatch, "claude", script)
-
-
 def error_envelope(result: str) -> str:
     envelope = {"type": "result", "is_error": True, "terminal_reason": "api_error", "result": result}
     return f"cat <<'EOF'\n{json.dumps(envelope)}\nEOF\nexit 1"
 
 
 def test_a_hung_claude_call_fails_only_that_request(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    fake_claude(tmp_path, monkeypatch, "sleep 5")
+    fake_executable(tmp_path, monkeypatch, "claude", "sleep 5")
 
     with pytest.raises(BackendError):
         claude_cli(SCHEMA, timeout=0.2)("prompt")
@@ -31,7 +27,7 @@ def test_a_hung_claude_call_fails_only_that_request(tmp_path: Path, monkeypatch:
 def test_a_transient_api_error_fails_only_that_request(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, message: str
 ) -> None:
-    fake_claude(tmp_path, monkeypatch, error_envelope(message))
+    fake_executable(tmp_path, monkeypatch, "claude", error_envelope(message))
 
     with pytest.raises(BackendError):
         claude_cli(SCHEMA)("prompt")
@@ -47,7 +43,9 @@ def test_a_missing_claude_stops_the_backend(tmp_path: Path, monkeypatch: pytest.
 def test_an_expired_login_stops_the_backend_and_says_how_to_fix_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    fake_claude(tmp_path, monkeypatch, error_envelope("Failed to authenticate: OAuth session expired"))
+    fake_executable(
+        tmp_path, monkeypatch, "claude", error_envelope("Failed to authenticate: OAuth session expired")
+    )
 
     with pytest.raises(BackendUnavailable, match="/login"):
         claude_cli(SCHEMA)("prompt")

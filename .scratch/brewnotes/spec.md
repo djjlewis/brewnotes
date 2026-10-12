@@ -44,7 +44,7 @@ Each package gets one severity, the highest that applies:
 - `notable`: features or improvements a typical user would notice.
 - `minor`: bug fixes, performance, docs, refactors, or dependency bumps.
 - `unknown`: no notes found.
-- `unchecked`: GitHub couldn't be checked, and no notes came from elsewhere. Only brewnotes sets this; Claude never returns it.
+- `unchecked`: GitHub couldn't be checked, and no notes came from elsewhere. Only brewnotes sets this. Claude never returns it.
 
 Each package also gets a one-sentence TL;DR, up to 5 highlights, the action needed (if any), and the CVE or advisory IDs mentioned. The config's `interests` text tells Claude what the owner counts as notable.
 

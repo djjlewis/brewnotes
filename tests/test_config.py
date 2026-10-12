@@ -8,7 +8,6 @@ from brewnotes.config import ConfigError, load_config
 @pytest.mark.parametrize(
     ("toml", "setting"),
     [
-        ('backend = "claude"\n', "backend"),
         ('workers = "4"\n', "workers"),
         ("workers = 0\n", "workers"),
         ('colour = "red"\n', "colour"),

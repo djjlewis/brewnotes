@@ -6,7 +6,6 @@ from datetime import datetime
 from typing import Any, Literal, NamedTuple, Protocol
 
 from .brew import Change
-from .github import GitHubError
 from .versions import same_version, version_from_tag, version_key
 
 MAX_NOTES_CHARS = 60_000
@@ -22,9 +21,16 @@ UNDERLINE_RE = re.compile(r"\s*(=+|-+)\s*")
 NOT_OWNERS = {"sponsors", "orgs", "apps", "features", "marketplace", "settings"}
 
 
+RATE_LIMITED = "rate limited"
+
+
+class FetchError(RuntimeError):
+    """A request failed for a reason other than "not found". The message is the reason."""
+
+
 class Source(Protocol):
     """Where release data comes from. Each method returns None when the repo or file doesn't
-    exist, and raises GitHubError when the request fails."""
+    exist, and raises FetchError when the request fails."""
 
     def releases(self, repo: str, page: int, per_page: int) -> list[dict[str, Any]] | None: ...
     def root_files(self, repo: str) -> list[str] | None: ...
@@ -65,7 +71,7 @@ class Notes:
     source: Literal["releases", "changelog", ""] = ""
     links: list[tuple[str, str]] = field(default_factory=list)  # (label, url)
     truncated: bool = False
-    error: str = ""  # why GitHub couldn't be checked; empty when it was
+    error: str = ""  # why GitHub couldn't be checked. Empty when it was checked.
 
 
 def find_repo(change: Change) -> str | None:
@@ -208,7 +214,7 @@ def fetch_notes(src: Source, change: Change, since: datetime | None = None) -> N
         return notes
     try:
         _read_notes(src, notes, notes.repo, change, since)
-    except GitHubError as e:
+    except FetchError as e:
         notes.text, notes.source, notes.error = "", "", str(e)
         notes.links.insert(0, ("releases", f"https://github.com/{notes.repo}/releases"))
         return notes

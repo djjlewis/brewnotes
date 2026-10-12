@@ -4,7 +4,7 @@ from typing import Any
 from brewnotes.brew import Change
 from brewnotes.llm import Ask, BackendError, BackendUnavailable
 from brewnotes.sources import Notes
-from brewnotes.triage import Severity, Triager
+from brewnotes.triage import Severity, Triager, build_prompt
 
 ANSWER = {
     "severity": "breaking",
@@ -127,3 +127,20 @@ def test_web_lookup_that_finds_nothing_after_a_github_failure_is_unchecked(tmp_p
     t = triager.triage(change(), Notes(repo="acme/tool", error="rate limited"))
 
     assert t.severity == Severity.UNCHECKED
+
+
+def test_a_cached_no_notes_answer_does_not_hide_a_later_github_failure(tmp_path: Path) -> None:
+    nothing = {**ANSWER, "severity": "unknown", "tldr": "No notes found."}
+    Triager("claude-cli", answers(), answers(nothing), tmp_path).triage(change(), Notes(repo="acme/tool"))
+
+    t = Triager("api", answers(), None, tmp_path).triage(
+        change(), Notes(repo="acme/tool", error="rate limited")
+    )
+
+    assert t.severity == Severity.UNCHECKED
+
+
+def test_the_web_lookup_prompt_gives_the_github_failure_not_a_missing_changelog() -> None:
+    prompt = build_prompt(change(), Notes(repo="acme/tool", error="rate limited"), "")
+
+    assert "rate limited" in prompt and "has no releases" not in prompt

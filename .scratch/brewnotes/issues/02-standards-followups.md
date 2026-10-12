@@ -1,6 +1,6 @@
-# Report fetch failures, check the config, and type the fixed value sets
+# Report fetch failures, validate the config, and type the fixed value sets
 
-Status: claimed
+Status: resolved
 Branch: fix/standards-followups
 
 The first `/code-review` Standards axis left these open. The owner decided them on 2026-10-12.
@@ -8,7 +8,7 @@ The first `/code-review` Standards axis left these open. The owner decided them 
 - Keep the `workers` setting, and check its type.
 - Keep anonymous GitHub access, because a future open release should work without `gh`. If `gh` is installed but not logged in, use anonymous access too.
 - Keep the `claude-cli` `model` setting. Keep the API backend's low effort and server-side fallback, and add them to the spec.
-- Do the rest: say when GitHub couldn't be checked, check the config file on load, warn when `brew update` fails, and replace severity strings with an enum and the other fixed sets with `Literal` types.
+- Do the rest: say when GitHub couldn't be checked, validate the config file on load, warn when `brew update` fails, and replace severity strings with an enum and the other fixed sets with `Literal` types.
 
 ## Acceptance examples
 
@@ -32,9 +32,23 @@ Implemented test-first. Each of the six examples has a test that failed on behav
 - `Config` is now frozen, and the CLI applies `--backend` and `--deps` with `dataclasses.replace`.
 - The report's five lookup tables keyed by severity strings are now one `SECTIONS` table keyed by `Severity`.
 
-Not covered: a dependency whose fetch fails is still dropped silently, because the dependency filter needs notes to look for security terms. Reporting every unchecked dependency would flood the report. This needs an owner decision if it matters.
+Not covered: a dependency whose fetch fails is still dropped silently. [Ticket 03](03-unchecked-dependencies.md) holds that decision.
 
 Verification: `uv run ruff format --check . && uv run ruff check . && uv run mypy . && uv run pytest` passes with 51 tests. Two real runs:
 
 - `brewnotes --no-update --greedy --no-save` triaged 11 pending updates with the owner's existing config.
 - `GH_TOKEN=invalid brewnotes recap --since 21d --backend none --no-save` used anonymous access. It reported "GitHub couldn't be checked for 15 packages (rate limited: 15)" with the `gh auth login` hint, and listed those packages under "Couldn't check".
+
+A second `/code-review` of commit f5c9c61 found more problems. The branch now also fixes them, each with a test that failed first unless noted:
+
+- A cached "no notes" answer could hide a later GitHub failure, because both have empty notes text. The triager now skips the cache, both reading and writing, when GitHub failed.
+- The rate-limit message counted packages that a web lookup had triaged. It now counts only packages left unchecked, so it matches the "Couldn't check" section.
+- After a GitHub failure, the web-lookup prompt told Claude that the repo had no releases. It now gives the failure.
+- `brewnotes config` prints the path even when the file is invalid, so the user can fix it.
+- `gh auth status` now asks about github.com only. A stale login for another host no longer forces anonymous access.
+- Connection resets and short reads during anonymous access count as network errors instead of stopping the run. This has no test, because a test would need a real socket.
+- The 5xx retry and the logged-out fallback had no tests. They have tests now, and those passed at once because the code already worked. Anonymous requests in the tests go through a dead proxy, so the tests never reach GitHub.
+- `FetchError` and `RATE_LIMITED` moved from the GitHub adapter to `sources.py`, next to the `Source` protocol that raises them.
+- The snapshot loader rejects a key that isn't `formula:name` or `cask:name`, instead of casting it unchecked.
+
+Verification: the checks pass with 57 tests.

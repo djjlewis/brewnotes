@@ -2,7 +2,7 @@
 
 import tomllib
 from collections.abc import Mapping
-from dataclasses import dataclass, field, fields
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Literal, get_args
 
@@ -83,31 +83,37 @@ class Paths:
         return Paths(config=config / "config.toml", snapshot=state / "snapshot.json", cache=cache / "triage")
 
 
-def load_config(path: Path) -> Config:
-    """Reads the config, writing the commented default first if there is none. Raises
-    ConfigError for invalid TOML, an unknown setting, or a value of the wrong type or range."""
+TYPE_NAMES = {str: "a string", bool: "true or false", int: "a whole number", list: "a list of strings"}
+
+
+def ensure_config(path: Path) -> None:
+    """Writes the commented default config if there is none."""
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(DEFAULT_CONFIG)
+
+
+def load_config(path: Path) -> Config:
+    """Reads the config, writing the default first if there is none. Raises ConfigError for
+    invalid TOML, an unknown setting, or a value of the wrong type or range."""
+    ensure_config(path)
     try:
         data = tomllib.loads(path.read_text())
     except tomllib.TOMLDecodeError as e:
         raise ConfigError(f"{path}: {e}") from e
+    defaults = asdict(Config())
     for key, value in data.items():
-        _check(path, key, value)
+        if key not in defaults:
+            raise ConfigError(f"{path}: unknown setting `{key}`")
+        _check_type(path, key, value, type(defaults[key]))
+    if data.get("backend", "claude-cli") not in BACKENDS:
+        raise ConfigError(f"{path}: `backend` must be one of {', '.join(BACKENDS)}, not {data['backend']!r}")
+    if data.get("workers", 1) < 1:
+        raise ConfigError(f"{path}: `workers` must be at least 1, not {data['workers']}")
     return Config(**data)
 
 
-def _check(path: Path, key: str, value: object) -> None:
-    defaults = Config()
-    if key not in {f.name for f in fields(Config)}:
-        raise ConfigError(f"{path}: unknown setting `{key}`")
-    expected = type(getattr(defaults, key))
+def _check_type(path: Path, key: str, value: object, expected: type) -> None:
     strings = isinstance(value, list) and all(isinstance(v, str) for v in value)
     if type(value) is not expected or (expected is list and not strings):
-        wanted = "a list of strings" if expected is list else f"a {expected.__name__}"
-        raise ConfigError(f"{path}: `{key}` must be {wanted}, not {value!r}")
-    if key == "backend" and value not in BACKENDS:
-        raise ConfigError(f"{path}: `backend` must be one of {', '.join(BACKENDS)}, not {value!r}")
-    if key == "workers" and isinstance(value, int) and value < 1:
-        raise ConfigError(f"{path}: `workers` must be at least 1, not {value}")
+        raise ConfigError(f"{path}: `{key}` must be {TYPE_NAMES[expected]}, not {value!r}")

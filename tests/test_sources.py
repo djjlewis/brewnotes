@@ -2,8 +2,7 @@ from datetime import datetime
 from typing import Any
 
 from brewnotes.brew import Change
-from brewnotes.github import GitHubError
-from brewnotes.sources import PAGE_SIZE, fetch_notes
+from brewnotes.sources import PAGE_SIZE, FetchError, fetch_notes
 
 REPO_URL = "https://github.com/acme/tool/archive/refs/tags/v1.3.0.tar.gz"
 
@@ -15,7 +14,7 @@ class FakeGitHub:
         self,
         releases: list[dict[str, Any]] | None = None,
         files: dict[str, str] | None = None,
-        fail: GitHubError | None = None,
+        fail: FetchError | None = None,
     ):
         self._releases = releases or []
         self._files = files or {}
@@ -227,7 +226,7 @@ def test_changelog_section_ends_at_an_old_version_heading_of_a_higher_level() ->
 
 
 def test_a_failed_github_request_is_recorded_instead_of_reading_as_no_notes() -> None:
-    gh = FakeGitHub(fail=GitHubError("rate limited"))
+    gh = FakeGitHub(fail=FetchError("rate limited"))
 
     notes = fetch_notes(gh, change("1.2.0", "1.3.0"))
 

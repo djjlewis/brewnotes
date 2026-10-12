@@ -10,8 +10,7 @@ from rich.console import Console
 from rich.markup import escape
 
 from .brew import Change
-from .github import RATE_LIMITED
-from .sources import Notes
+from .sources import RATE_LIMITED, Notes
 from .triage import Severity, Triage
 
 
@@ -58,9 +57,9 @@ def grouped(items: list[Item]) -> dict[Severity, list[Item]]:
 
 
 def fetch_problem(items: list[Item]) -> str | None:
-    """One line summing up the packages GitHub couldn't be checked for, with the fix for a
-    rate limit. None when every package was checked."""
-    reasons = Counter(i.notes.error for i in items if i.notes.error)
+    """One line summing up the packages left unchecked because GitHub failed, with the fix for a
+    rate limit. None when there are none."""
+    reasons = Counter(i.notes.error for i in items if i.triage.severity is Severity.UNCHECKED)
     if not reasons:
         return None
     n = sum(reasons.values())

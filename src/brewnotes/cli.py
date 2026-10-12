@@ -12,7 +12,7 @@ from pathlib import Path
 from rich.console import Console
 
 from . import brew, llm
-from .config import BACKENDS, Config, ConfigError, Paths, load_config
+from .config import BACKENDS, Config, ConfigError, Paths, ensure_config, load_config
 from .github import GitHub
 from .report import Item, fetch_problem, render_terminal, save_markdown
 from .sources import fetch_notes
@@ -148,13 +148,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> None:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     paths = Paths.from_env(os.environ, Path.home())
+    if args.cmd == "config":  # print the path even when the file is invalid, so it can be fixed
+        ensure_config(paths.config)
+        print(paths.config)
+        return
     try:
         cfg = load_config(paths.config)
     except ConfigError as e:
         sys.exit(f"brewnotes: {e}")
-    if args.cmd == "config":
-        print(paths.config)
-        return
     cfg = replace(
         cfg, backend=args.backend or cfg.backend, include_dependencies=cfg.include_dependencies or args.deps
     )
